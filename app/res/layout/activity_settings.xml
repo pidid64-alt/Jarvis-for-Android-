@@ -36,11 +36,72 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- API ключ -->
+        <!-- Провайдер ИИ -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="22dp"
+            android:text="@string/provider"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/spProvider"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_input"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp" />
+
+        <TextView
+            android:id="@+id/tvProviderDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/text_dim"
+            android:textSize="12sp" />
+
+        <!-- Адрес сервера -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/base_url"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/etBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_input"
+            android:textColorHint="@color/text_dim"
+            android:textColor="@color/text_main"
+            android:inputType="textUri"
+            android:maxLines="1"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="13dp"
+            android:paddingBottom="13dp"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/base_url_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="12sp" />
+
+        <!-- API-ключ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
             android:text="@string/api_key_hint"
             android:textColor="@color/cyan"
             android:textSize="14sp"
@@ -52,7 +113,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_input"
-            android:hint="AIza… / AQ.…" 
+            android:hint="AIza… / sk-…"
             android:textColorHint="@color/text_dim"
             android:textColor="@color/text_main"
             android:inputType="text"
@@ -64,10 +125,44 @@
             android:textSize="14sp" />
 
         <TextView
+            android:id="@+id/tvKeyDesc"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="@string/api_key_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="12sp" />
+
+        <!-- Модель -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/model"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/etModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_input"
+            android:textColorHint="@color/text_dim"
+            android:textColor="@color/text_main"
+            android:inputType="text"
+            android:maxLines="1"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="13dp"
+            android:paddingBottom="13dp"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/tvModelHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
             android:textColor="@color/text_dim"
             android:textSize="12sp" />
 
@@ -75,31 +170,12 @@
             android:id="@+id/btnCheckKey"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="12dp"
             android:text="@string/check_key"
             android:textColor="@color/bg"
             android:backgroundTint="@color/cyan"
             android:paddingStart="22dp"
             android:paddingEnd="22dp" />
-
-        <!-- Модель -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:text="@string/model"
-            android:textColor="@color/cyan"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <Spinner
-            android:id="@+id/spModel"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_input"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp" />
 
         <!-- Переключатели -->
         <LinearLayout

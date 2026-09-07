@@ -216,16 +216,15 @@ class MainActivity : Activity() {
             return
         }
 
-        val key = Prefs.apiKey(this)
-        if (key.isEmpty()) {
-            deliver(getString(R.string.api_key_missing), remember = true)
+        if (!Llm.ready(this)) {
+            deliver(Llm.missingKeyText(this), remember = true)
             return
         }
 
         busy = true
         setStatus(getString(R.string.status_thinking))
         orb.state = OrbView.State.THINKING
-        GeminiClient.chatAsync(key, Prefs.model(this), Conversation.history().dropLast(1), shown) { answer ->
+        Llm.chatAsync(this, Conversation.history().dropLast(1), shown) { answer ->
             ui.post {
                 busy = false
                 deliver(answer, remember = true)

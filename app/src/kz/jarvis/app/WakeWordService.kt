@@ -370,16 +370,15 @@ class WakeWordService : Service() {
         }
 
         // не офлайн-команда — спрашиваем ИИ
-        val key = Prefs.apiKey(this)
-        if (key.isEmpty()) {
-            say("Такой команды офлайн у меня нет, сэр. Для свободных ответов нужен API-ключ Gemini — он в настройках приложения.") {
+        if (!Llm.ready(this)) {
+            say("Такой команды офлайн у меня нет, сэр. " + Llm.missingKeyText(this)) {
                 launchActivity(false)
                 backToWake()
             }
             return
         }
         Conversation.add(text, true)
-        GeminiClient.chatAsync(key, Prefs.model(this), Conversation.history(), text) { answer ->
+        Llm.chatAsync(this, Conversation.history(), text) { answer ->
             ui.post {
                 Conversation.add(answer, false)
                 say(answer) { backToWake() }

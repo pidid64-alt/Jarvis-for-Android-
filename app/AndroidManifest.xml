@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="kz.jarvis.app"
-    android:versionCode="2"
-    android:versionName="2.0">
+    android:versionCode="4"
+    android:versionName="2.2">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -15,6 +16,14 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- «кто звонил последним», «перезвони» -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- «какой у меня номер» (номер SIM-карты) -->
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <!-- «яркость 40 процентов»: выдаётся пользователем в системном окне -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- напоминания в точное время -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- «поверх других окон»: сфера над экраном + запуск окон из фона -->

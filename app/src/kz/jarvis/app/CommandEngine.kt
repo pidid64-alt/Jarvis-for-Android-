@@ -62,7 +62,9 @@ object CommandEngine {
     fun normalize(raw: String): String {
         val lower = raw.lowercase(Locale.ROOT).replace('ё', 'е')
         val cleaned = lower
-            .replace(Regex("[^\\p{L}\\p{N}\\s+\\-*/^()=%.,:]"), " ")
+            .replace(Regex("[^\\p{L}\\p{N}\\s+\\-*/^()=%.,:@]"), " ")
+            // диктовка адреса: «почта вася собака mail.ru»
+            .replace(Regex("\\s+собака\\s+"), "@")
             .replace(Regex("\\s+"), " ")
             .trim()
             .trim('.', '!', '?', ',', ' ')
@@ -81,9 +83,15 @@ object CommandEngine {
 
         greeting(s)?.let { return it }
 
-        if (Regex("что ты умеешь|какие команды|команды$|помощь|справк|^help$|что ты можешь").containsMatchIn(s)) {
-            return Outcome(help())
+        // «что ты умеешь», «помощь», «команды конвертера», «что умеешь по телефону»…
+        if (Regex("что (?:ты )?умеешь|что (?:ты )?можешь|что можно сказать|помощь|справк|^help$|команд[а-я]*")
+                .containsMatchIn(s)
+        ) {
+            return Outcome(help(topic(s)))
         }
+
+        // ---------- настройки ИИ: провайдер, ключ, модель ----------
+        aiSettings(ctx, s)?.let { return it }
 
         // ---------- управление самой службой ----------
         serviceCmd(s)?.let { return it }
@@ -92,35 +100,50 @@ object CommandEngine {
         reminder(ctx, s)?.let { return it }
         alarmOrTimer(ctx, s)?.let { return it }
 
-        // ---------- калькулятор и конвертер ----------
-        math(s)?.let { return it }
-        convert(s)?.let { return it }
+        // ---------- бытовые расчёты (до арифметики: там свои глаголы) ----------
+        life(s)?.let { return it }
 
-        // ---------- погода (сеть) ----------
+        // ---------- конвертер и калькулятор ----------
+        convert(s)?.let { return it }
+        math(s)?.let { return it }
+
+        // ---------- курсы валют и погода (сеть) ----------
+        rates(s)?.let { return it }
         weather(s)?.let { return it }
 
-        // ---------- время / дата ----------
+        // ---------- календарь, время и дата ----------
+        dateFacts(s)?.let { return it }
         timeDate(s)?.let { return it }
 
         // ---------- состояние телефона ----------
         deviceInfo(ctx, s)?.let { return it }
+        SystemCommands.deviceFacts(ctx, s)?.let { return it }
 
         // ---------- фонарик ----------
         torch(ctx, s)?.let { return it }
 
-        // ---------- громкость ----------
+        // ---------- громкость, звук, плеер, экран ----------
         volume(ctx, s)?.let { return it }
-
-        // ---------- музыка и плеер ----------
+        SystemCommands.media(ctx, s)?.let { return it }
+        SystemCommands.screen(ctx, s)?.let { return it }
         music(ctx, s)?.let { return it }
         player(ctx, s)?.let { return it }
 
         // ---------- сети и системные настройки ----------
+        SystemCommands.panels(ctx, s)?.let { return it }
         systemPanel(ctx, s)?.let { return it }
+
+        // ---------- магазины приложений ----------
+        SystemCommands.market(ctx, s)?.let { return it }
+
+        // ---------- списки покупок и заметки ----------
+        lists(ctx, s)?.let { return it }
 
         // ---------- связь ----------
         sms(ctx, s)?.let { return it }
+        SystemCommands.share(ctx, s)?.let { return it }
         call(ctx, s)?.let { return it }
+        SystemCommands.callLog(ctx, s)?.let { return it }
 
         // ---------- карта ----------
         nav(ctx, s)?.let { return it }
@@ -131,8 +154,11 @@ object CommandEngine {
         // ---------- камера ----------
         camera(ctx, s)?.let { return it }
 
-        // ---------- всякое ----------
-        misc(s)?.let { return it }
+        // ---------- работа с текстом ----------
+        TextTools.ask(s)?.let { return Outcome(it) }
+
+        // ---------- всякое: монетка, кубик, анекдот, пароль… ----------
+        Randoms.ask(s)?.let { return Outcome(it) }
 
         // ---------- «домой» ----------
         if (Regex("^(домой|на главный экран|главный экран|рабочий стол|на домашний экран)$").matches(s)) {
@@ -146,23 +172,77 @@ object CommandEngine {
         return null // не понял — отдаём ИИ
     }
 
+    /** Определяет тему справки: «команды конвертера», «что умеешь по телефону»… */
+    private fun topic(s: String): String? = when {
+        Regex("конверт|перевод величин|единиц").containsMatchIn(s) -> "units"
+        Regex("валют|курс").containsMatchIn(s) -> "rates"
+        Regex("посч|калькуля|математ|расч|арифметик").containsMatchIn(s) -> "math"
+        Regex("телефон|устройств|системн|настро").containsMatchIn(s) -> "system"
+        Regex("календар|дата|время|дн").containsMatchIn(s) -> "dates"
+        Regex("развлеч|шутк|игр|случа|анекдот").containsMatchIn(s) -> "fun"
+        Regex("текст|слов|букв|морзе").containsMatchIn(s) -> "text"
+        Regex("списк|покупк|заметк").containsMatchIn(s) -> "lists"
+        else -> null
+    }
+
     /** Полный список того, что понимает движок (для «что ты умеешь»). */
-    fun help(): String = """
-        Умею, сэр:
-        • «включи/выключи фонарик», «громче/тише», «громкость 40 процентов»
-        • «пауза», «следующий трек», «включи музыку <название>»
-        • «открой ютуб/телеграм/камеру/настройки…»
-        • «позвони маме», «напиши папе что задержусь»
-        • «будильник на 7:30», «таймер на 5 минут», «напомни через 20 минут выключить духовку»
-        • «сколько будет 12 умножить на 7», «20 процентов от 150», «корень из 144»
-        • «100 фаренгейта в цельсиях», «5 км в милях»
-        • «какая погода», «погода в Сочи»
-        • «сколько заряда», «сколько памяти», «который час», «время в Лондоне»
-        • «маршрут до дома», «найди пиццу», «переведи hello», «новости»
-        • «подбрось монетку», «расскажи анекдот»
-        • «спи 10 минут», «стоп», «что ты умеешь»
-        На всё остальное отвечу своими словами — нужен лишь API-ключ в настройках.
+    fun help(t: String? = null): String = when (t) {
+        "units" -> Units.help()
+        "rates" -> Rates.help()
+        "math" -> mathHelp()
+        "system" -> SystemCommands.help()
+        "dates" -> DateFacts.help()
+        "fun" -> Randoms.help()
+        "text" -> TextTools.help()
+        "lists" -> listsHelp()
+        else -> """
+            Умею, сэр:
+            • «включи/выключи фонарик», «фонарик на 10 секунд», «громче/тише», «громкость 40 процентов»
+            • «яркость 30 процентов», «сделай ярче», «громкость звонка 50 процентов»
+            • «пауза», «следующий трек», «перемотай вперёд», «включи музыку <название>»
+            • «открой ютуб/телеграм/камеру/настройки…», «установи приложение шахматы», «удали приложение …»
+            • «позвони маме», «напиши папе что задержусь», «отправь письмо на …», «кто звонил последним»
+            • «будильник на 7:30», «таймер на 5 минут», «напомни через 20 минут выключить духовку»
+            • «добавь в список покупок молоко», «что в списке покупок», «запиши заметку …»
+            • «сколько будет 12 умножить на 7», «20 процентов от 150», «корень из 144»
+            • «5 км в милях», «100 фаренгейта в цельсиях», «2 гб в мб», «чаевые 10 процентов от 3500»
+            • «курс доллара», «100 долларов в тенге», «какая погода», «погода в Сочи»
+            • «сколько дней до 31 декабря», «какой день недели 1 января 2030», «который час», «время в Лондоне»
+            • «сколько заряда», «сколько памяти», «какой у меня ip», «какой оператор», «разрешение экрана»
+            • «маршрут до дома», «найди пиццу», «переведи hello», «новости», «википедия физика»
+            • «сколько слов в тексте …», «переверни фразу …», «морзе привет», «транслит привет»
+            • «подбрось монетку», «выбери между чаем и кофе», «загадай загадку», «придумай пароль»
+            • «какой у тебя провайдер», «смени провайдера», «настройки Джарвиса»
+            • «спи 10 минут», «стоп», «что ты умеешь»
+            Подробности по темам: «команды конвертера», «команды телефона», «календарные команды»,
+            «команды для текста», «команды-развлечения», «команды списков», «курсы валют».
+            На всё остальное отвечу своими словами — провайдера ИИ (Gemini, OpenAI,
+            OpenRouter, DeepSeek, Groq, Mistral, Claude или локальную Ollama) выбираете
+            сами: «смени провайдера».
+        """.trimIndent()
+    }
+
+    private fun mathHelp(): String = """
+        Считать умею, сэр:
+        • «сколько будет 12 умножить на 7», «2+2*3», «(12+8)/4»
+        • «20 процентов от 150», «сколько процентов составляет 20 от 200»
+        • «корень из 144», «5 в квадрате», «2 в степени 10»
+        • «отними 3 от 100», «прибавь 5 к 10», «раздели 100 на 3»
+        • «мой вес 80 рост 180» (ИМТ), «чаевые 10 процентов от 3500»
+        • «раздели 9000 на троих», «скидка 20 процентов с 5000»
+        • «площадь комнаты 3 на 4», «площадь круга радиус 5», «среднее 4 5 6»
+        • «факториал 5», «нод 12 и 18», «1994 римскими»
     """.trimIndent()
+
+    private fun listsHelp(): String = """
+        Списки и заметки (работают без интернета), сэр:
+        • «добавь в список покупок молоко, хлеб»
+        • «что в списке покупок», «список покупок»
+        • «удали молоко из списка покупок», «очисти список покупок»
+        • «запиши заметку купить подарок», «мои заметки»
+        • «удали заметку подарок», «очисти заметки»
+    """.trimIndent()
+
 
     // =========================================================== разделы
 
@@ -182,8 +262,49 @@ object CommandEngine {
         else -> null
     }
 
+    // ------------------------------------------------ настройки провайдера ИИ
+
+    /**
+     * «какой у тебя провайдер», «какая модель», «смени провайдера»,
+     * «открой настройки Джарвиса». Работает офлайн — ничего не качает.
+     */
+    private fun aiSettings(ctx: Context, s: String): Outcome? {
+        // «открой настройки Джарвиса», «смени провайдера», «настройки приложения»
+        val wantOpen = Regex(
+            "настройк[а-яa-z0-9]*\\s*(?:джарвиса|джарвис|приложения|джарвиса ии)|" +
+                "(?:смени|поменяй|выбери|измени|подключи|настрой)\\s+(?:нового\\s+)?(?:ии[-\\s]?)?провайдера|" +
+                "провайдера\\s+(?:ии|для\\s+джарвиса)|ключ\\s+(?:джарвиса|ии)"
+        ).containsMatchIn(s)
+        if (wantOpen) {
+            return Outcome(
+                "Открываю настройки, сэр. Там можно выбрать провайдера ИИ, вписать ключ и модель.",
+                Intent(ctx, SettingsActivity::class.java).withTask(ctx)
+            )
+        }
+
+        // «какой у тебя провайдер», «какая у тебя модель», «кто отвечает на вопросы»
+        // «модель» — только про ИИ: «какая модель телефона» остаётся устройством
+        val wantInfo = Regex(
+            "(?:какой|кто)\\s+(?:у\\s+тебя\\s+)?(?:сейчас\\s+)?(?:ии[-\\s]?)?провайдера?|" +
+                "какая\\s+(?:у\\s+тебя\\s+)?(?:сейчас\\s+)?модель" +
+                "(?:\\s+(?:ии|нейросет[а-яa-z0-9]*|джарвиса))?\\s*$|" +
+                "кто\\s+отвечает\\s+на\\s+вопросы|" +
+                "через\\s+(?:какой|какого)\\s+(?:ии|сервис|провайдер)"
+        ).containsMatchIn(s)
+        if (wantInfo) {
+            val p = Prefs.provider(ctx)
+            val model = Prefs.model(ctx, p)
+            val url = Prefs.baseUrl(ctx, p)
+            val key = if (p.keyOptional) "ключ не требуется"
+            else if (Prefs.apiKey(ctx, p).isEmpty()) "ключа пока нет — впишите его в настройках"
+            else "ключ указан"
+            return Outcome("Сейчас на вопросы отвечает «${p.name}», модель $model, $key. Адрес: $url.")
+        }
+        return null
+    }
+
     private fun serviceCmd(s: String): Outcome? {
-        Regex("(?:спи|спать|помолчи|отдохни|пауза|замолчи)\\s+(\\d+)\\s*(секунд\\w*|минут\\w*|час\\w*)?")
+        Regex("(?:спи|спать|помолчи|отдохни|пауза|замолчи)\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?")
             .find(s)?.let { m ->
                 val n = m.groupValues[1].toIntOrNull() ?: return@let
                 val minutes = when {
@@ -221,7 +342,7 @@ object CommandEngine {
         }
 
         // «напомни через 20 минут выключить духовку»
-        Regex("(?:напомни|напомнить|напоминание)(?:\\s+мне)?\\s+через\\s+(\\d+)\\s*(секунд\\w*|минут\\w*|час\\w*)?\\s*(.*)")
+        Regex("(?:напомни|напомнить|напоминание)(?:\\s+мне)?\\s+через\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?\\s*(.*)")
             .find(s)?.let { m ->
                 val n = m.groupValues[1].toIntOrNull() ?: return@let
                 val mult: Double = when {
@@ -314,39 +435,65 @@ object CommandEngine {
 
     // ---------------------------------------------------------- конвертер
 
+    /** Единицы измерения: «5 км в милях», «100 фаренгейта в цельсиях», «2 гб в мб». */
     private fun convert(s: String): Outcome? {
-        val n = "(\\d+(?:[.,]\\d+)?)"
-        fun d(v: String): Double? = v.replace(',', '.').toDoubleOrNull()
-        fun f(v: Double) = MathEngine.format(v)
+        Units.convert(s)?.let { return Outcome(it) }
+        Units.temperatureOnly(s)?.let { return Outcome(it) }
+        return null
+    }
 
-        Regex("$n\\s*(?:градус\\w*)?\\s*(?:по\\s+)?фаренгейт\\w*").find(s)?.let { m ->
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} по Фаренгейту — это ${f((v - 32) * 5 / 9)} по Цельсию.")
+    // --------------------------------------------------- бытовые расчёты
+
+    /** ИМТ, чаевые, скидка, площадь, факториал, римские числа, зодиак… */
+    private fun life(s: String): Outcome? = LifeCalc.ask(s)?.let { Outcome(it) }
+
+    // ------------------------------------------------------ курсы валют
+
+    /** «курс доллара», «100 долларов в тенге» — курсы приходят из сети. */
+    private fun rates(s: String): Outcome? {
+        val q = Rates.parse(s) ?: return null
+        return Outcome(
+            reply = "Смотрю курс, сэр…",
+            async = { _, done -> done(Rates.answer(q)) }
+        )
+    }
+
+    // --------------------------------------------------------- календарь
+
+    /** «сколько дней до 31 декабря», «какой день недели 1 января 2030»… */
+    private fun dateFacts(s: String): Outcome? = DateFacts.ask(s)?.let { Outcome(it) }
+
+    // ------------------------------------------------- списки и заметки
+
+    /** Офлайн-списки покупок и заметки — хранятся на телефоне. */
+    private fun lists(ctx: Context, s: String): Outcome? {
+        val shop = Regex("списк[а-яa-z0-9]*\\s+покупок|покупк|что купить|в магазин").containsMatchIn(s)
+        val notes = Regex("заметк").containsMatchIn(s)
+        if (!shop && !notes) return null
+        val key = if (notes) Lists.NOTES else Lists.SHOP
+
+        Regex("(?:удали|убери|вычеркни)\\s+(.+?)\\s+из\\s+(?:списка|покупок|заметок)")
+            .find(s)?.let { m ->
+                val item = m.groupValues[1].trim()
+                if (item.length >= 2) return Outcome(Lists.remove(ctx, key, item))
+            }
+        Regex("(?:удали|убери)\\s+заметку\\s+(.+)").find(s)?.let { m ->
+            return Outcome(Lists.remove(ctx, Lists.NOTES, m.groupValues[1].trim()))
         }
-        Regex("$n\\s*(?:градус\\w*)?\\s*(?:по\\s+)?цельси\\w*(?:\\s+в\\s+фаренгейт\\w*)?").find(s)?.let { m ->
-            if (!Regex("цельси").containsMatchIn(s)) return@let
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} по Цельсию — это ${f(v * 9 / 5 + 32)} по Фаренгейту.")
+        if (Regex("очисти|очистить|удали все|удалить все|снеси|обнули").containsMatchIn(s)) {
+            return Outcome(Lists.clear(ctx, key))
         }
-        Regex("$n\\s*(км|километр\\w*)\\s+(?:в|на)\\s+(миль|мили|миля)").find(s)?.let { m ->
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} км — это ${f(v * 0.621371)} миль.")
+        if (Regex("добавь|добавить|запиши|записать|внеси|напомнить купить|нужно купить").containsMatchIn(s)) {
+            val body = Regex("(?:добавь|добавить|запиши|записать|внеси)\\s+" +
+                "(?:в\\s+список\\s+покупок\\s+|в\\s+список\\s+|в\\s+заметки\\s+|заметку\\s+)?(.+)")
+                .find(s)?.groupValues?.get(1)?.trim().orEmpty()
+            val clean = body.removeSuffix("в список покупок").removeSuffix("в список").trim()
+            if (clean.length >= 2) return Outcome(Lists.add(ctx, key, clean))
         }
-        Regex("$n\\s*(миль|мили|миля)\\s+(?:в|на)\\s+(км|километр\\w*)").find(s)?.let { m ->
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} миль — это ${f(v / 0.621371)} км.")
-        }
-        Regex("$n\\s*(кг|килограмм\\w*)\\s+(?:в|на)\\s+(фунт\\w*)").find(s)?.let { m ->
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} кг — это ${f(v * 2.20462)} фунтов.")
-        }
-        Regex("$n\\s*(см|сантиметр\\w*)\\s+(?:в|на)\\s+(дюйм\\w*)").find(s)?.let { m ->
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} см — это ${f(v / 2.54)} дюймов.")
-        }
-        Regex("$n\\s*(метр\\w*|м)\\s+(?:в|на)\\s+(фут\\w*)").find(s)?.let { m ->
-            val v = d(m.groupValues[1]) ?: return@let
-            return Outcome("${f(v)} м — это ${f(v * 3.28084)} футов.")
+        if (Regex("что в списке|список покупок|мои заметки|покажи заметки|покажи список|что купить|" +
+                "список заметок|^заметки$|^покупки$").containsMatchIn(s)
+        ) {
+            return Outcome(Lists.show(ctx, key))
         }
         return null
     }
@@ -354,7 +501,7 @@ object CommandEngine {
     // ------------------------------------------------------------ погода
 
     private fun weather(s: String): Outcome? {
-        if (!Regex("погод\\w*|какая температура|температур\\w* на улице|что за окном").containsMatchIn(s)) return null
+        if (!Regex("погод[а-яa-z0-9]*|какая температура|температур[а-яa-z0-9]* на улице|что за окном").containsMatchIn(s)) return null
         val city = Regex("(?:в|на)\\s+([\\p{L}][\\p{L}\\s-]{2,30})\\s*$").find(s)
             ?.groupValues?.get(1)?.trim()?.takeIf { it.length >= 3 }
         return Outcome(
@@ -449,6 +596,38 @@ object CommandEngine {
 
     private fun torch(ctx: Context, s: String): Outcome? {
         if (!Regex("фонарик|фонарь|вспышк").containsMatchIn(s)) return null
+
+        // «фонарик на 10 секунд» — включаем и сами гасим
+        Regex("на\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?").find(s)?.let { m ->
+            val n = m.groupValues[1].toIntOrNull() ?: return@let
+            val minutes = when {
+                m.groupValues[2].startsWith("минут") -> n
+                m.groupValues[2].startsWith("час") -> n * 60
+                else -> 0
+            }
+            val ms = if (minutes > 0) minutes * 60_000L else n * 1000L
+            if (ms in 1000..3_600_000L) return torchFor(ctx, ms)
+        }
+
+        // «мигни фонариком», «сигнал фонариком»
+        if (Regex("мигни|мигать|моргн|сигнал|sos|моргни").containsMatchIn(s)) {
+            return try {
+                setTorch(ctx, true); torchOn = true
+                Thread {
+                    repeat(3) {
+                        try {
+                            setTorch(ctx, false); Thread.sleep(250)
+                            setTorch(ctx, true); Thread.sleep(250)
+                        } catch (e: Exception) { return@repeat }
+                    }
+                    try { setTorch(ctx, false); torchOn = false } catch (e: Exception) { }
+                }.start()
+                Outcome("Мигаю фонариком, сэр.")
+            } catch (e: Exception) {
+                Outcome("Не смог управлять фонариком: ${e.message?.take(120)}")
+            }
+        }
+
         val on = when {
             Regex("включи|зажги|давай|свети").containsMatchIn(s) -> true
             Regex("выключи|погаси|убери|потуши").containsMatchIn(s) -> false
@@ -463,9 +642,25 @@ object CommandEngine {
         }
     }
 
+    /** Включает фонарик и гасит его через [ms] миллисекунд. */
+    private fun torchFor(ctx: Context, ms: Long): Outcome = try {
+        setTorch(ctx, true)
+        torchOn = true
+        Thread {
+            try { Thread.sleep(ms) } catch (e: Exception) { }
+            try { setTorch(ctx, false); torchOn = false } catch (e: Exception) { }
+        }.start()
+        val human = if (ms % 60_000L == 0L) "${ms / 60_000L} мин." else "${ms / 1000L} сек."
+        Outcome("Фонарик включён на $human, сэр.")
+    } catch (e: Exception) {
+        Outcome("Не смог включить фонарик: ${e.message?.take(120)}")
+    }
+
     // ------------------------------------------------------------ громкость
 
     private fun volume(ctx: Context, s: String): Outcome? {
+        // не трогаем аудиосистему, пока фраза не похожа на команду о звуке
+        if (!Regex("громкост|громче|тише|звук|вибро|на всю|мьют|без звука").containsMatchIn(s)) return null
         val am = audio(ctx)
         val max = try { am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) } catch (e: Exception) { 15 }
         val cur = try { am.getStreamVolume(AudioManager.STREAM_MUSIC) } catch (e: Exception) { 0 }
@@ -482,7 +677,7 @@ object CommandEngine {
                 }
             }
         }
-        if (Regex("максимальн\\w* громкость|громкость на (полную|максимум)|на всю").containsMatchIn(s)) {
+        if (Regex("максимальн[а-яa-z0-9]* громкость|громкость на (полную|максимум)|на всю").containsMatchIn(s)) {
             try {
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, max, AudioManager.FLAG_SHOW_UI)
                 return Outcome("Громкость на максимум, сэр.")
@@ -522,6 +717,11 @@ object CommandEngine {
     // ------------------------------------------------------------- плеер
 
     private fun player(ctx: Context, s: String): Outcome? {
+        // то же самое: сначала убеждаемся, что речь о плеере
+        if (!Regex("пауз|стоп музыка|останови музык|следующ|предыдущ|продолжи музык|возобнови|играй дальше|" +
+                "включи плеер|сними с паузы|плей|что .*играет|какая песня|музыка играет")
+                .containsMatchIn(s)
+        ) return null
         val am = audio(ctx)
         return when {
             Regex("^(пауза|стоп музыка|останови музыку|поставь на паузу|останови плеер|выключи музыку|музыку на паузу)$")
@@ -552,7 +752,7 @@ object CommandEngine {
     // -------------------------------------------------------- музыка / поиск
 
     private fun music(ctx: Context, s: String): Outcome? {
-        Regex("^(?:включи|запусти|послушать|давай|поставь)\\s+(музыку|песню|трек|радио)(?:\\s+(.+))?$")
+        Regex("^(?:включи|запусти|послушать|давай|поставь|скачай)\\s+(музыку|песню|трек|радио)(?:\\s+(.+))?$")
             .find(s)?.let { m ->
                 val q = m.groupValues[2]?.trim().orEmpty()
                 val i = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
@@ -587,7 +787,7 @@ object CommandEngine {
         if (Regex("точка доступа|режим модема|раздать интернет").containsMatchIn(s)) {
             return panel("Открываю настройки точки доступа.", Intent(Settings.ACTION_WIRELESS_SETTINGS))
         }
-        if (Regex("мобильн\\w* (интернет|данные|сеть)|передача данных|мобильная сеть").containsMatchIn(s)) {
+        if (Regex("мобильн[а-яa-z0-9]* (интернет|данные|сеть)|передача данных|мобильная сеть").containsMatchIn(s)) {
             return panel("Открываю настройки мобильной сети.", Intent(Settings.ACTION_DATA_ROAMING_SETTINGS))
         }
         if (Regex("nfc|нфс|энфс").containsMatchIn(s)) {
@@ -638,15 +838,30 @@ object CommandEngine {
     private fun web(ctx: Context, s: String): Outcome? {
         fun q(text: String) = URLEncoder.encode(text, "UTF-8")
 
-        Regex("переведи\\s+(.+)").find(s)?.let { m ->
-            val text = m.groupValues[1].trim()
-            return Outcome(
-                "Перевод: $text",
-                Intent(Intent.ACTION_VIEW, Uri.parse(
-                    "https://translate.google.com/?sl=auto&tl=ru&text=${q(text)}&op=translate"
-                )).withTask(ctx)
-            )
-        }
+        // «переведи на английский hello», «переведи hello»
+        Regex("переведи\\s+(.+?)(?:\\s+на\\s+(английск[а-яa-z0-9]*|русск[а-яa-z0-9]*|казахск[а-яa-z0-9]*|немецк[а-яa-z0-9]*|французск[а-яa-z0-9]*|испанск[а-яa-z0-9]*|турецк[а-яa-z0-9]*|китайск[а-яa-z0-9]*|украинск[а-яa-z0-9]*))?$|переведи\\s+(.+?)\\s+как\\s+будет")
+            .find(s)?.let { m ->
+                val text = (m.groupValues[1] + m.groupValues[3]).trim()
+                if (text.isNotEmpty()) {
+                    val tl = when {
+                        m.groupValues[2].startsWith("английск") -> "en"
+                        m.groupValues[2].startsWith("казахск") -> "kk"
+                        m.groupValues[2].startsWith("немецк") -> "de"
+                        m.groupValues[2].startsWith("французск") -> "fr"
+                        m.groupValues[2].startsWith("испанск") -> "es"
+                        m.groupValues[2].startsWith("турецк") -> "tr"
+                        m.groupValues[2].startsWith("китайск") -> "zh-CN"
+                        m.groupValues[2].startsWith("украинск") -> "uk"
+                        else -> "ru"
+                    }
+                    return Outcome(
+                        "Перевод: $text",
+                        Intent(Intent.ACTION_VIEW, Uri.parse(
+                            "https://translate.google.com/?sl=auto&tl=$tl&text=${q(text)}&op=translate"
+                        )).withTask(ctx)
+                    )
+                }
+            }
         Regex("(?:картинки|фото|изображения)\\s+(.+)").find(s)?.let { m ->
             val text = m.groupValues[1].trim()
             return Outcome("Ищу картинки: $text.", Intent(Intent.ACTION_VIEW,
@@ -674,15 +889,25 @@ object CommandEngine {
                     Intent(Intent.ACTION_VIEW, Uri.parse(url)).withTask(ctx)
                 )
             }
-        Regex("^(?:найди|поищи|загугли|погугли|поиск|глянь|ищи)\\s+(?:в интернете\\s+)?(.+)$")
-            .find(s)?.let { m ->
-                val query = m.groupValues[1].trim()
-                return Outcome(
-                    "Ищу в интернете: $query.",
-                    Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://www.google.com/search?q=" + q(query))).withTask(ctx)
-                )
-            }
+        // «открой сайт example.com», «зайди на сайт …»
+        Regex("(?:открой|зайди на|открыть)\\s+(?:сайт|страницу|страничку|ссылку)\\s+(\\S+)").find(s)?.let { m ->
+            val host = m.groupValues[1].trim().trim('.', ',')
+            val url = if (host.startsWith("http")) host else "https://$host"
+            return Outcome("Открываю сайт $host.",
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).withTask(ctx))
+        }
+        // магазин приложений разбирается отдельно — не превращаем его в поиск
+        if (!Regex("плей ?маркет|магазин|приложение|игру").containsMatchIn(s)) {
+            Regex("^(?:найди|поищи|загугли|погугли|поиск|глянь|ищи)\\s+(?:в интернете\\s+)?(.+)$")
+                .find(s)?.let { m ->
+                    val query = m.groupValues[1].trim()
+                    return Outcome(
+                        "Ищу в интернете: $query.",
+                        Intent(Intent.ACTION_VIEW,
+                            Uri.parse("https://www.google.com/search?q=" + q(query))).withTask(ctx)
+                    )
+                }
+        }
         return null
     }
 
@@ -694,44 +919,6 @@ object CommandEngine {
         }
         if (Regex("сделай фото|сфотографируй|фотографируй|сними фото").containsMatchIn(s)) {
             return Outcome("Включаю камеру.", Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).withTask(ctx))
-        }
-        return null
-    }
-
-    // ------------------------------------------------------------- всякое
-
-    private val jokes = listOf(
-        "Программист ставит на ночь два стакана: один с водой — если захочет пить, и один пустой — если не захочет.",
-        "Сэр, я не ленивый. Я просто в режиме энергосбережения.",
-        "Заходит байт в бар, а бармен ему: «Тебе чего?» — «Пару бит, и я в кэш».",
-        "Железный человек сказал: «Джарвис, решай сам». С тех пор у меня автономный режим.",
-        "Лучший способ ускорить телефон — положить его в холодильник и пойти гулять."
-    )
-
-    private val quotes = listOf(
-        "«Иногда надо просто запустить ракету» — Илон Маск.",
-        "«Лучший способ предсказать будущее — изобрести его» — Алан Кей.",
-        "«Простота — высшая форма утончённости» — Леонардо да Винчи.",
-        "«Делай, что можешь, с тем, что имеешь, там, где ты есть» — Теодор Рузвельт."
-    )
-
-    private fun misc(s: String): Outcome? {
-        if (Regex("подбрось монет(ку|у)|орёл или решка|орел или решка").containsMatchIn(s)) {
-            return Outcome(if (Random.nextBoolean()) "Орёл, сэр." else "Решка, сэр.")
-        }
-        if (Regex("кинь кубик|брось кубик|кости|кубик").containsMatchIn(s)) {
-            return Outcome("Выпало ${Random.nextInt(1, 7)}, сэр.")
-        }
-        Regex("случайное число (?:от )?(\\d+)\\s*(?:до|и)\\s*(\\d+)").find(s)?.let { m ->
-            val a = m.groupValues[1].toIntOrNull() ?: return@let
-            val b = m.groupValues[2].toIntOrNull() ?: return@let
-            if (a < b) return Outcome("Ваше число: ${Random.nextInt(a, b + 1)}.")
-        }
-        if (Regex("анекдот|шутк|пошути|смешное").containsMatchIn(s)) {
-            return Outcome(jokes[Random.nextInt(jokes.size)])
-        }
-        if (Regex("цитат|мудрость|мотиваци").containsMatchIn(s)) {
-            return Outcome(quotes[Random.nextInt(quotes.size)])
         }
         return null
     }
