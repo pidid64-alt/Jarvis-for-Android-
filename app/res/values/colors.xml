@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#05070D</color>
+    <color name="panel">#0B1524</color>
+    <color name="panel_light">#12203A</color>
+    <color name="cyan">#33D6FF</color>
+    <color name="cyan_bright">#7FE9FF</color>
+    <color name="cyan_dim">#1A6E8C</color>
+    <color name="amber">#FFB300</color>
+    <color name="text_main">#E6F1FF</color>
+    <color name="text_dim">#8FA8C0</color>
+    <color name="bubble_user">#12324E</color>
+    <color name="bubble_jarvis">#0E1E33</color>
+    <color name="danger">#FF5252</color>
+</resources>

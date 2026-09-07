@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg">
+
+    <!-- Верхняя панель -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="18dp"
+        android:paddingEnd="10dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="J.A.R.V.I.S."
+            android:textColor="@color/cyan"
+            android:textSize="21sp"
+            android:letterSpacing="0.18"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/btnWake"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:padding="9dp"
+            android:contentDescription="@string/wake_on"
+            android:src="@drawable/ic_mic_bg"
+            android:background="?android:attr/selectableItemBackgroundBorderless" />
+
+        <ImageView
+            android:id="@+id/btnSettings"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:padding="9dp"
+            android:contentDescription="@string/settings"
+            android:src="@drawable/ic_gear"
+            android:background="?android:attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
+
+    <!-- Статус -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingBottom="8dp"
+        android:text="@string/status_idle"
+        android:textColor="@color/cyan_dim"
+        android:textSize="13sp" />
+
+    <!-- Чат -->
+    <ScrollView
+        android:id="@+id/scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:overScrollMode="never"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/llMessages"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="18dp" />
+    </ScrollView>
+
+    <!-- Нижняя панель: ввод + сфера -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="bottom"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="10dp">
+
+        <EditText
+            android:id="@+id/etInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_input"
+            android:hint="@string/hint_input"
+            android:textColorHint="@color/text_dim"
+            android:textColor="@color/text_main"
+            android:maxLines="4"
+            android:inputType="textCapSentences|textMultiLine"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:textSize="15sp" />
+
+        <ImageView
+            android:id="@+id/btnSend"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginBottom="8dp"
+            android:padding="11dp"
+            android:contentDescription="@string/send"
+            android:src="@drawable/ic_send"
+            android:background="?android:attr/selectableItemBackgroundBorderless" />
+
+        <kz.jarvis.app.OrbView
+            android:id="@+id/orb"
+            android:layout_width="104dp"
+            android:layout_height="104dp"
+            android:layout_marginStart="4dp" />
+    </LinearLayout>
+</LinearLayout>

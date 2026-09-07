@@ -1,0 +1,21 @@
+# Build outputs
+build/
+app/build/
+out/
+dist/
+target/
+releases/*.idsig
+
+# Local toolchain (fetched by scripts/fetch-toolchain.sh)
+toolchain/
+/keystore/
+
+# Gradle (for Android Studio users)
+.gradle/
+local.properties
+*.iml
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
