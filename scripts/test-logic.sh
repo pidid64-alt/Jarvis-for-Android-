@@ -2,7 +2,8 @@
 # ============================================================
 #  Быстрые тесты «чистой» логики (без Android-эмулятора).
 #  Компилируются те же самые исходники, что попадают в APK:
-#    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Timezones}.kt
+#    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Timezones,
+#                           Units,LifeCalc,DateFacts,TextTools,Randoms}.kt
 #  + тестовая обёртка tools/LogicTest.kt. Выполняется на JVM.
 #
 #  Требуется тот же тулчейн, что и для scripts/build-apk.sh
@@ -31,7 +32,7 @@ with zipfile.ZipFile(src) as zi, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED)
 print("ok")
 PY
 
-echo "==> [2/3] kotlinc: MathEngine + WakeWords + LogicTest"
+echo "==> [2/3] kotlinc: чистая логика + LogicTest"
 JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   -no-jdk -nowarn -jvm-target 1.8 \
@@ -41,6 +42,11 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   "$ROOT/app/src/kz/jarvis/app/WakeWords.kt" \
   "$ROOT/app/src/kz/jarvis/app/TimeParse.kt" \
   "$ROOT/app/src/kz/jarvis/app/Timezones.kt" \
+  "$ROOT/app/src/kz/jarvis/app/Units.kt" \
+  "$ROOT/app/src/kz/jarvis/app/LifeCalc.kt" \
+  "$ROOT/app/src/kz/jarvis/app/DateFacts.kt" \
+  "$ROOT/app/src/kz/jarvis/app/TextTools.kt" \
+  "$ROOT/app/src/kz/jarvis/app/Randoms.kt" \
   "$ROOT/tools/LogicTest.kt" 2>&1 | grep -v "^WARNING" | grep -v "jansi" | grep -v "native" || true
 
 if [ -z "$(find "$OUT/classes" -name '*.class')" ]; then

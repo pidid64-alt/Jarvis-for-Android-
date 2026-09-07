@@ -11,12 +11,12 @@ object TimeParse {
     data class Duration(val seconds: Int, val human: String)
     data class Clock(val hour: Int, val minute: Int, val human: String)
 
-    private const val UNIT = "(секунд\\w*|минут\\w*|час\\w*)?"
+    private const val UNIT = "(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?"
 
     /** «через 10 минут», «таймер на 5 минут», «напомни через 2 часа». */
     fun duration(s: String): Duration? {
         Regex("через\\s+(\\d+)\\s*$UNIT").find(s)?.let { return build(it) }
-        Regex("таймер\\w*\\s+на\\s+(\\d+)\\s*$UNIT").find(s)?.let { return build(it) }
+        Regex("таймер[а-яa-z0-9]*\\s+на\\s+(\\d+)\\s*$UNIT").find(s)?.let { return build(it) }
         return null
     }
 
