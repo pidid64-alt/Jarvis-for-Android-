@@ -20,34 +20,67 @@ import android.widget.Toast
 
 class SettingsActivity : Activity() {
 
+    private lateinit var spProvider: Spinner
+    private lateinit var tvProviderDesc: TextView
+    private lateinit var etBaseUrl: EditText
     private lateinit var etKey: EditText
-    private lateinit var spModel: Spinner
+    private lateinit var tvKeyDesc: TextView
+    private lateinit var etModel: EditText
+    private lateinit var tvModelHint: TextView
     private lateinit var swTts: Switch
     private lateinit var swWake: Switch
     private lateinit var tvBgStatus: TextView
+
+    /** Провайдер, чьи настройки сейчас показаны в полях. */
+    private var activeProvider: Providers.Provider? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
+        spProvider = findViewById(R.id.spProvider)
+        tvProviderDesc = findViewById(R.id.tvProviderDesc)
+        etBaseUrl = findViewById(R.id.etBaseUrl)
         etKey = findViewById(R.id.etKey)
-        spModel = findViewById(R.id.spModel)
+        tvKeyDesc = findViewById(R.id.tvKeyDesc)
+        etModel = findViewById(R.id.etModel)
+        tvModelHint = findViewById(R.id.tvModelHint)
         swTts = findViewById(R.id.swTts)
         swWake = findViewById(R.id.swWake)
         tvBgStatus = findViewById(R.id.tvBgStatus)
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
-        etKey.setText(Prefs.apiKey(this))
-
-        val models = Prefs.MODELS
-        spModel.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_item, models
+        // --- провайдер ИИ ---
+        spProvider.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, Providers.names()
         ).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
-        val current = Prefs.model(this)
-        spModel.setSelection(models.indexOf(current).coerceAtLeast(0))
+        spProvider.setSelection(Providers.indexOf(Prefs.provider(this).id))
+        showProvider(Prefs.provider(this))
+
+        // Спиннер сообщает о выборе и при первой отрисовке — поэтому смотрим,
+        // поменялся ли провайдер на самом деле.
+        spProvider.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long
+            ) {
+                val chosen = Providers.ALL[pos]
+                val prev = activeProvider
+                when {
+                    prev == null -> showProvider(chosen)
+                    prev.id == chosen.id -> return
+                    else -> {
+                        saveFields(prev)   // настройки прежнего провайдера — в его слот
+                        Prefs.setProvider(this@SettingsActivity, chosen.id)
+                        showProvider(chosen)
+                    }
+                }
+            }
+
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         swTts.isChecked = Prefs.ttsOn(this)
         swWake.isChecked = Prefs.wakeOn(this)
@@ -78,20 +111,24 @@ class SettingsActivity : Activity() {
         }
 
         findViewById<Button>(R.id.btnCheckKey).setOnClickListener {
+            val p = currentProvider()
             val key = etKey.text.toString().trim()
-            val model = models[spModel.selectedItemPosition.coerceAtLeast(0)]
-            if (key.isEmpty()) {
+            val model = etModel.text.toString().trim()
+            if (key.isEmpty() && !p.keyOptional) {
                 Toast.makeText(this, "Вставьте ключ, сэр", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            Toast.makeText(this, "Проверяю…", Toast.LENGTH_SHORT).show()
+            if (model.isEmpty()) {
+                Toast.makeText(this, "Впишите название модели, сэр", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            saveFields()
+            Toast.makeText(this, "Проверяю ${p.name}…", Toast.LENGTH_SHORT).show()
             Thread {
-                val err = GeminiClient.ping(key, model)
+                val err = Llm.ping(p, Prefs.baseUrl(this, p), key, model)
                 runOnUiThread {
                     if (err == null) {
-                        Toast.makeText(this, R.string.key_ok, Toast.LENGTH_LONG).show()
-                        Prefs.setApiKey(this, key)
-                        Prefs.setModel(this, model)
+                        Toast.makeText(this, getString(R.string.key_ok, p.name), Toast.LENGTH_LONG).show()
                     } else {
                         Toast.makeText(this, getString(R.string.key_bad, err.take(120)), Toast.LENGTH_LONG).show()
                     }
@@ -188,9 +225,43 @@ class SettingsActivity : Activity() {
         false
     }
 
+    // ------------------------------------------------------- провайдер ИИ
+
+    private fun currentProvider(): Providers.Provider = activeProvider
+        ?: Providers.ALL[spProvider.selectedItemPosition.coerceIn(0, Providers.ALL.lastIndex)]
+
+    /** Заполняет поля под выбранного провайдера. */
+    private fun showProvider(p: Providers.Provider) {
+        activeProvider = p
+        val customUrl = Prefs.baseUrl(this, p)
+        etBaseUrl.setText(if (customUrl == p.baseUrl) "" else customUrl)
+        etBaseUrl.hint = p.baseUrl
+        etKey.setText(Prefs.apiKey(this, p))
+        etKey.hint = p.keyExample.ifEmpty { "ключ не требуется" }
+        etModel.setText(Prefs.model(this, p))
+        etModel.hint = p.defaultModel.ifEmpty { "например: llama3.2" }
+        tvProviderDesc.text = p.description()
+        tvKeyDesc.text = if (p.keyOptional) {
+            "Ключ не нужен — модель работает на вашем устройстве или в вашей сети."
+        } else {
+            "Ключ хранится только на телефоне. Получить: ${p.keyUrl}"
+        }
+        tvModelHint.text = if (p.models.isEmpty()) {
+            "Впишите название модели, которое отдаёт ваш сервер."
+        } else {
+            "Можно вписать любую: ${p.models.joinToString(", ")}"
+        }
+    }
+
+    /** Сохраняет то, что сейчас в полях, для выбранного провайдера. */
+    private fun saveFields(p: Providers.Provider = currentProvider()) {
+        Prefs.setApiKey(this, etKey.text.toString(), p)
+        Prefs.setModel(this, etModel.text.toString(), p)
+        Prefs.setBaseUrl(this, etBaseUrl.text.toString(), p)
+    }
+
     override fun onPause() {
-        Prefs.setApiKey(this, etKey.text.toString())
-        Prefs.setModel(this, Prefs.MODELS[spModel.selectedItemPosition.coerceAtLeast(0)])
+        saveFields()
         super.onPause()
     }
 

@@ -2,6 +2,9 @@ package kz.jarvis.tools
 
 import kz.jarvis.app.DateFacts
 import kz.jarvis.app.LifeCalc
+import kz.jarvis.app.LlmRequests
+import kz.jarvis.app.Persona
+import kz.jarvis.app.Providers
 import kz.jarvis.app.MathEngine
 import kz.jarvis.app.Randoms
 import kz.jarvis.app.TextTools
@@ -200,6 +203,75 @@ fun main() {
     check("код", true, Regex("^Ваш код: \\d{6}\\.$").matches(Randoms.ask("случайный код из 6 цифр", Random(9)) ?: ""))
     check("анекдот", true, (Randoms.ask("расскажи анекдот", Random(11))?.length ?: 0) > 10)
     check("не развлечение", null, Randoms.ask("включи фонарик", Random(11)))
+
+    println("== Провайдеры ИИ ==")
+    check("по умолчанию — Gemini", "gemini", Providers.byId(null).id)
+    check("неизвестный id — Gemini", "gemini", Providers.byId("такого-нет").id)
+    check("Groq — формат OpenAI", Providers.Api.OPENAI, Providers.byId("groq").api)
+    check("Claude — свой формат", Providers.Api.ANTHROPIC, Providers.byId("anthropic").api)
+    check("Ollama — без ключа", true, Providers.byId("ollama").keyOptional)
+    check("Ollama — локальный адрес", "http://127.0.0.1:11434/v1", Providers.byId("ollama").baseUrl)
+    check("индекс найденного", Providers.ALL.indexOfFirst { it.id == "deepseek" }, Providers.indexOf("deepseek"))
+    check("индекс неизвестного — 0", 0, Providers.indexOf("хм"))
+    check("id уникальны", Providers.ALL.size, Providers.ALL.map { it.id }.distinct().size)
+    check("имена уникальны", Providers.ALL.size, Providers.names().distinct().size)
+    check("у всех есть адрес", true, Providers.ALL.all { it.baseUrl.startsWith("http") })
+    check("источник ключа неизвестен только у своего сервера", listOf("custom"),
+        Providers.ALL.filter { !it.keyOptional && it.keyUrl.isBlank() }.map { it.id })
+    check("модель по умолчанию", "deepseek-chat", Providers.byId("deepseek").defaultModel)
+    check("у своего сервера моделей нет", "", Providers.byId("custom").defaultModel)
+
+    println("== Личность ==")
+    check("системный промпт — про Джарвиса", true, Persona.SYSTEM_PROMPT.contains("Джарвис"))
+    check("системный промпт — по-русски", true, Persona.SYSTEM_PROMPT.contains("по-русски"))
+    check("промпт запрещает Markdown", true, Persona.SYSTEM_PROMPT.contains("Markdown"))
+
+    println("== Запросы к модели ==")
+    check("экранирование кавычки", "\"он сказал \\\"привет\\\"\"", LlmRequests.json("он сказал \"привет\""))
+    check("экранирование переноса", "\"а\\nб\"", LlmRequests.json("а\nб"))
+    check("экранирование слэша", "\"c:\\\\temp\"", LlmRequests.json("c:\\temp"))
+    check("кириллица без \\u", "\"привет, сэр\"", LlmRequests.json("привет, сэр"))
+    check("табуляция", "\"а\\tб\"", LlmRequests.json("а\tб"))
+
+    check("адрес Gemini", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        LlmRequests.geminiUrl("https://generativelanguage.googleapis.com", "gemini-2.5-flash"))
+    check("адрес Gemini со слэшем на конце",
+        "https://api.example.com/v1beta/models/m1:generateContent",
+        LlmRequests.geminiUrl("https://api.example.com/", " m1 "))
+    check("адрес OpenAI", "https://api.openai.com/v1/chat/completions",
+        LlmRequests.openAiUrl("https://api.openai.com/v1/"))
+    check("адрес Anthropic", "https://api.anthropic.com/v1/messages",
+        LlmRequests.anthropicUrl("https://api.anthropic.com/v1"))
+
+    val hist = listOf(true to "привет", false to "здравствуй, сэр")
+    check("тело OpenAI",
+        "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"Ты — Джарвис\"}," +
+            "{\"role\":\"user\",\"content\":\"привет\"},{\"role\":\"assistant\",\"content\":\"здравствуй, сэр\"}," +
+            "{\"role\":\"user\",\"content\":\"как дела?\"}],\"temperature\":0.7,\"max_tokens\":10}",
+        LlmRequests.openAiBody("gpt-4o-mini", "Ты — Джарвис", hist, "как дела?", 10))
+    check("тело Anthropic",
+        "{\"model\":\"claude-sonnet-4-5\",\"max_tokens\":10,\"temperature\":0.7," +
+            "\"system\":\"Ты — Джарвис\",\"messages\":[{\"role\":\"user\",\"content\":\"привет\"}," +
+            "{\"role\":\"assistant\",\"content\":\"здравствуй, сэр\"},{\"role\":\"user\",\"content\":\"как дела?\"}]}",
+        LlmRequests.anthropicBody("claude-sonnet-4-5", "Ты — Джарвис", hist, "как дела?", 10))
+    check("тело Gemini",
+        "{\"systemInstruction\":{\"parts\":[{\"text\":\"Ты — Джарвис\"}]},\"contents\":[" +
+            "{\"role\":\"user\",\"parts\":[{\"text\":\"привет\"}]}," +
+            "{\"role\":\"model\",\"parts\":[{\"text\":\"здравствуй, сэр\"}]}," +
+            "{\"role\":\"user\",\"parts\":[{\"text\":\"как дела?\"}]}" +
+            "],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":10}}",
+        LlmRequests.geminiBody("Ты — Джарвис", hist, "как дела?", 10))
+
+    val long = (1..30).map { (it % 2 == 1) to "реплика $it" }
+    check("история OpenAI ограничена", 14,
+        LlmRequests.openAiBody("m", "s", long, "вопрос").split("\"content\"").size - 1)
+    check("история Anthropic ограничена", 13,
+        LlmRequests.anthropicBody("m", "s", long, "вопрос").split("\"content\"").size - 1)
+    check("история Gemini ограничена", 14,
+        LlmRequests.geminiBody("s", long, "вопрос").split("\"parts\"").size - 1)
+    check("последняя реплика — от пользователя", true,
+        LlmRequests.openAiBody("m", "s", long, "вопрос").endsWith(
+            "{\"role\":\"user\",\"content\":\"вопрос\"}],\"temperature\":0.7,\"max_tokens\":600}"))
 
     println("")
     println("пройдено: $passed, провалено: $failed")

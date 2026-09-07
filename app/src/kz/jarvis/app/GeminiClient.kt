@@ -1,27 +1,17 @@
 package kz.jarvis.app
 
-import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
+/**
+ * Клиент Google Gemini (`:generateContent`). Системный промпт и тело запроса
+ * берутся из [Persona] и [LlmRequests] — там же они у остальных провайдеров.
+ */
 object GeminiClient {
 
     private val executor = Executors.newSingleThreadExecutor()
-
-    private const val SYSTEM_PROMPT =
-        "Ты — Джарвис, голосовой ИИ-ассистент на Android, вдохновлённый Джарвисом из «Железного человека». " +
-        "Правила: отвечай по-русски, кратко (обычно 1–3 предложения), по делу, дружелюбно, с лёгкой иронией и " +
-        "изредка обращайся к пользователю «сэр». Текущую дату и время ты не знаешь — не выдумывай их. " +
-        "Ты также умеешь управлять телефоном офлайн-командами (они выполняются мгновенно, даже когда приложение " +
-        "закрыто): «включи фонарик», «громкость 40 процентов», «пауза», «следующий трек», «включи музыку <название>», " +
-        "«открой <приложение>», «позвони <имя>», «напиши <имя> <текст>», «будильник на 7:30», «таймер на 5 минут», " +
-        "«напомни через 20 минут <дело>», «сколько будет 12 умножить на 7», «20 процентов от 150», «корень из 144», " +
-        "«100 фаренгейта в цельсиях», «сколько заряда», «сколько памяти», «который час», «время в Лондоне», " +
-        "«какая погода», «маршрут до <места>», «найди <запрос>», «переведи <слово>», «новости», «подбрось монетку», " +
-        "«спи 10 минут», «что ты умеешь». " +
-        "Если пользователь просит такое действие — коротко подтверди готовность и предложи произнести команду."
 
     /** Асинхронный запрос. cb вызывается в фоновом потоке — вызывающий сам переводит в UI. */
     fun chatAsync(
@@ -29,11 +19,12 @@ object GeminiClient {
         model: String,
         history: List<Pair<Boolean, String>>,
         text: String,
+        baseUrl: String = Providers.ALL[0].baseUrl,
         cb: (String) -> Unit
     ) {
         executor.execute {
             val answer = try {
-                chat(key, model, history, text)
+                chat(baseUrl, key, model, history, text)
             } catch (e: Exception) {
                 "Сэр, связь с сервером оборвалась: ${e.message ?: "неизвестная ошибка"}"
             }
@@ -42,21 +33,25 @@ object GeminiClient {
     }
 
     /** Быстрый тест ключа. Возвращает null при успехе, иначе текст ошибки. */
-    fun ping(key: String, model: String): String? = try {
-        val answer = chat(key, model, emptyList(), "Ответь ровно одним словом: работает")
+    fun ping(
+        key: String,
+        model: String,
+        baseUrl: String = Providers.ALL[0].baseUrl
+    ): String? = try {
+        val answer = chat(baseUrl, key, model, emptyList(), "Ответь ровно одним словом: работает")
         if (answer.startsWith("Ошибка")) answer else null
     } catch (e: Exception) {
         e.message ?: "ошибка сети"
     }
 
     private fun chat(
+        baseUrl: String,
         key: String,
         model: String,
         history: List<Pair<Boolean, String>>,
         text: String
     ): String {
-        val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-            .openConnection() as HttpURLConnection
+        val conn = URL(LlmRequests.geminiUrl(baseUrl, model)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 15000
@@ -65,31 +60,8 @@ object GeminiClient {
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             conn.setRequestProperty("x-goog-api-key", key)
 
-            val body = JSONObject()
-            body.put(
-                "systemInstruction",
-                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_PROMPT)))
-            )
-            val contents = JSONArray()
-            for ((isUser, t) in history.takeLast(12)) {
-                contents.put(
-                    JSONObject()
-                        .put("role", if (isUser) "user" else "model")
-                        .put("parts", JSONArray().put(JSONObject().put("text", t)))
-                )
-            }
-            contents.put(
-                JSONObject()
-                    .put("role", "user")
-                    .put("parts", JSONArray().put(JSONObject().put("text", text)))
-            )
-            body.put("contents", contents)
-            body.put(
-                "generationConfig",
-                JSONObject().put("temperature", 0.7).put("maxOutputTokens", 600)
-            )
-
-            val bytes = body.toString().toByteArray(Charsets.UTF_8)
+            val bytes = LlmRequests.geminiBody(Persona.SYSTEM_PROMPT, history, text)
+                .toByteArray(Charsets.UTF_8)
             conn.setFixedLengthStreamingMode(bytes.size)
             conn.outputStream.use { it.write(bytes) }
 
@@ -101,7 +73,7 @@ object GeminiClient {
                 val msg = try {
                     JSONObject(raw).getJSONObject("error").optString("message")
                 } catch (e: Exception) {
-                    "HTTP $code"
+                    raw.take(200).ifBlank { "HTTP $code" }
                 }
                 val hint = if (code == 400 || code == 401 || code == 403)
                     " — проверьте API-ключ в настройках" else ""
