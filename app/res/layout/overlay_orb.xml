@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal">
+
+    <TextView
+        android:id="@+id/ovText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_card"
+        android:maxWidth="300dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/text_main"
+        android:textSize="13sp" />
+
+    <ImageView
+        android:id="@+id/ovOrb"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/bg_orb_overlay"
+        android:contentDescription="@string/app_name"
+        android:padding="13dp"
+        android:src="@drawable/ic_mic_bg" />
+</LinearLayout>

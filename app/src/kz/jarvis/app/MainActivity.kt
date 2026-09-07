@@ -26,6 +26,10 @@ import java.util.Date
 
 class MainActivity : Activity() {
 
+    companion object {
+        const val EXTRA_RESTART_WAKE = "restart_wake"
+    }
+
     private lateinit var llMessages: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var tvStatus: TextView
@@ -36,8 +40,6 @@ class MainActivity : Activity() {
     private lateinit var tts: TtsController
     private val ui = Handler(Looper.getMainLooper())
 
-    private val history = ArrayList<Pair<Boolean, String>>()
-    private var lastReply = ""
     private var busy = false
 
     private var speech: SpeechRecognizer? = null
@@ -75,28 +77,38 @@ class MainActivity : Activity() {
 
         orb.setOnClickListener { if (listening) stopListening() else startListening() }
 
-        requestPermissions(
-            arrayOf(Manifest.permission.RECORD_AUDIO), 10
-        )
+        etInput.inputType = InputType.TYPE_CLASS_TEXT
+        etInput.setOnEditorActionListener { _, _, _ -> sendTyped(); true }
+
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10)
 
         if (!Prefs.saidHello(this)) {
             addMessage(getString(R.string.hello_first), false)
             Prefs.setSaidHello(this)
-            if (Prefs.ttsOn(this)) tts.speak(
-                "С возвращением, сэр. Джарвис к вашим услугам."
-            )
+            if (Prefs.ttsOn(this)) tts.speak("С возвращением, сэр. Джарвис к вашим услугам.")
         }
-        refreshWakeIcon()
 
-        if (intent.getBooleanExtra(WakeWordService.EXTRA_AUTO_LISTEN, false)) {
-            ui.postDelayed({ startListening() }, 350)
-        }
+        handleWakeIntent(intent)
+        refreshWakeIcon()
+        ensureWakeService()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleWakeIntent(intent)
+    }
+
+    private fun handleWakeIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.getBooleanExtra(EXTRA_RESTART_WAKE, false)) {
+            Prefs.setWakeOn(this, true)
+            WakeWordService.start(this)
+            Toast.makeText(this, "Прослушивание включено — скажите «Джарвис»", Toast.LENGTH_LONG).show()
+            intent.removeExtra(EXTRA_RESTART_WAKE)
+        }
         if (intent.getBooleanExtra(WakeWordService.EXTRA_AUTO_LISTEN, false)) {
+            intent.removeExtra(WakeWordService.EXTRA_AUTO_LISTEN)
             ui.postDelayed({ startListening() }, 350)
         }
     }
@@ -105,6 +117,14 @@ class MainActivity : Activity() {
         super.onResume()
         tts.enabled = Prefs.ttsOn(this)
         refreshWakeIcon()
+        WakeWordService.notifyUi(this, true)
+        ensureWakeService()
+    }
+
+    override fun onPause() {
+        // окно закрывается — пусть фоновая служба снова слушает микрофон
+        WakeWordService.notifyUi(this, false)
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -112,6 +132,13 @@ class MainActivity : Activity() {
         speech = null
         tts.shutdown()
         super.onDestroy()
+    }
+
+    /** Возвращаем фоновое прослушивание к жизни (например, после перезагрузки). */
+    private fun ensureWakeService() {
+        if (!Prefs.wakeOn(this)) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        WakeWordService.start(this)
     }
 
     // ---------------- отправка / обработка ----------------
@@ -128,27 +155,62 @@ class MainActivity : Activity() {
 
     private fun handleUser(text: String) {
         if (text.isBlank() || busy) return
-        addMessage(text, true)
-        history.add(true to text)
+        val shown = WakeWords.removeFromText(text).ifBlank { text }
+        addMessage(shown, true)
         tts.stop()
 
-        if (CommandEngine.normalize(text) == "повтори" || CommandEngine.normalize(text) == "скажи еще раз") {
-            deliver(lastReply.ifEmpty { "Пока мне нечего повторить, сэр." }, remember = false)
+        val norm = CommandEngine.normalize(shown)
+        if (norm == "повтори" || norm == "скажи еще раз" || norm == "повтори еще раз") {
+            val again = Conversation.lastReply.ifEmpty { "Пока мне нечего повторить, сэр." }
+            deliver(again, remember = false)
+            return
+        }
+        if (norm == "очисти историю" || norm == "забудь все") {
+            Conversation.clear()
+            deliver("История диалога очищена, сэр.")
             return
         }
 
+        Conversation.add(shown, true)
+
         val outcome = try {
-            CommandEngine.execute(this, text)
+            CommandEngine.execute(this, shown)
         } catch (e: Exception) {
             null
         }
         if (outcome != null) {
+            if (outcome.sleepMinutes > 0) {
+                Prefs.setSnoozeUntil(this, System.currentTimeMillis() + outcome.sleepMinutes * 60_000L)
+            }
+            if (outcome.stopWake) {
+                Prefs.setWakeOn(this, false)
+                WakeWordService.stop(this)
+                refreshWakeIcon()
+            }
             if (outcome.launch != null) {
                 try {
                     startActivity(outcome.launch)
                 } catch (e: Exception) {
                     Toast.makeText(this, "Не удалось открыть: ${e.message?.take(80)}", Toast.LENGTH_SHORT).show()
                 }
+            }
+            if (outcome.async != null) {
+                busy = true
+                setStatus(getString(R.string.status_thinking))
+                orb.state = OrbView.State.THINKING
+                Thread {
+                    var answer = "Не получилось, сэр."
+                    try {
+                        outcome.async(this) { answer = it }
+                    } catch (e: Exception) {
+                        answer = "Ошибка: ${e.message?.take(80) ?: "неизвестно"}"
+                    }
+                    ui.post {
+                        busy = false
+                        deliver(answer)
+                    }
+                }.start()
+                return
             }
             deliver(outcome.reply, remember = true, silent = outcome.silent || outcome.stopTts)
             return
@@ -163,7 +225,7 @@ class MainActivity : Activity() {
         busy = true
         setStatus(getString(R.string.status_thinking))
         orb.state = OrbView.State.THINKING
-        GeminiClient.chatAsync(key, Prefs.model(this), history.dropLast(1), text) { answer ->
+        GeminiClient.chatAsync(key, Prefs.model(this), Conversation.history().dropLast(1), shown) { answer ->
             ui.post {
                 busy = false
                 deliver(answer, remember = true)
@@ -173,12 +235,7 @@ class MainActivity : Activity() {
 
     private fun deliver(reply: String, remember: Boolean = true, silent: Boolean = false) {
         if (remember) {
-            lastReply = reply
-            history.add(false to reply)
-            if (history.size > 24) {
-                history.removeAt(0)
-                history.removeAt(0)
-            }
+            Conversation.add(reply, false)
         }
         addMessage(reply, false)
         if (!silent && Prefs.ttsOn(this)) tts.speak(reply)
@@ -262,8 +319,7 @@ class MainActivity : Activity() {
     private fun stopListening() {
         try {
             speech?.stopListening()
-        } catch (e: Exception) {
-        }
+        } catch (e: Exception) { }
         listening = false
         setStatus(getString(R.string.status_idle))
         orb.state = OrbView.State.IDLE
@@ -271,13 +327,9 @@ class MainActivity : Activity() {
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {}
-
         override fun onBeginningOfSpeech() {}
-
         override fun onRmsChanged(rmsdB: Float) {}
-
         override fun onBufferReceived(buffer: ByteArray?) {}
-
         override fun onEndOfSpeech() {}
 
         override fun onError(error: Int) {
@@ -353,6 +405,7 @@ class MainActivity : Activity() {
         when (requestCode) {
             10 -> if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 setStatus(getString(R.string.status_idle))
+                ensureWakeService()
             } else {
                 Toast.makeText(this, "Без микрофона голос не работает — пишите текстом", Toast.LENGTH_LONG).show()
             }
