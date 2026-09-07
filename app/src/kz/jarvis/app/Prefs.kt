@@ -11,12 +11,16 @@ object Prefs {
     private const val K_HELLO = "said_hello"
 
     val MODELS = arrayOf(
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-pro-preview",
         "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
         "gemini-2.5-pro"
     )
-    const val DEFAULT_MODEL = "gemini-2.5-flash"
+    const val DEFAULT_MODEL = "gemini-3.8-flash"
 
     private fun sp(c: Context) = c.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
