@@ -19,6 +19,9 @@ KJAR="${JARVIS_KOTLIN_JAR:-/opt/detekt/detekt-cli-1.23.8/lib/detekt-cli-1.23.8-a
 OUT="$ROOT/app/build/offline"
 RELEASES="$ROOT/releases"
 ABI_MIN=26
+# имя файла берём из версии в манифесте
+VERSION=$(grep -o 'android:versionName="[^"]*"' "$ROOT/app/AndroidManifest.xml" | head -1 | cut -d'"' -f2)
+APK="$RELEASES/Jarvis-v${VERSION:-1.0}.apk"
 
 echo "==> [1/7] aapt2: компиляция ресурсов"
 rm -rf "$OUT"
@@ -126,9 +129,9 @@ if [ ! -f "$KS" ]; then
 fi
 "$JAVA_BIN" -cp "$BT/lib/apksigner.jar" com.android.apksigner.ApkSignerTool sign \
   --ks "$KS" --ks-pass pass:jarvis25 --ks-key-alias jarvis \
-  --out "$RELEASES/Jarvis-v1.0.apk" "$OUT/aligned.apk"
-"$JAVA_BIN" -cp "$BT/lib/apksigner.jar" com.android.apksigner.ApkSignerTool verify --print-certs "$RELEASES/Jarvis-v1.0.apk" | head -3
+  --out "$APK" "$OUT/aligned.apk"
+"$JAVA_BIN" -cp "$BT/lib/apksigner.jar" com.android.apksigner.ApkSignerTool verify --print-certs "$APK" | head -3
 
 echo ""
-echo "✅ ГОТОВО: $RELEASES/Jarvis-v1.0.apk"
-ls -la "$RELEASES/Jarvis-v1.0.apk"
+echo "✅ ГОТОВО: $APK"
+ls -la "$APK"
