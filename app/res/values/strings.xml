@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Джарвис</string>
+    <string name="settings">Настройки</string>
+    <string name="status_idle">Нажми на сферу или напиши</string>
+    <string name="status_listening">Слушаю…</string>
+    <string name="status_thinking">Думаю…</string>
+    <string name="status_speaking">Говорю…</string>
+    <string name="hint_input">Спроси или скомандуй…</string>
+    <string name="send">Отправить</string>
+    <string name="hello_first">С возвращением, сэр! Я — Джарвис, ваш личный ассистент.\n\nЯ умею:\n• управлять телефоном голосом: «включи фонарик», «открой ютуб», «позвони маме», «будильник на 7:30»\n• отвечать на вопросы (нужен API-ключ Gemini — см. Настройки ⚙)\n\nПроизнесите «Джарвис» при включённой службе голосовой активации.</string>
+    <string name="no_internet">Нет доступа к сети</string>
+    <string name="api_key_missing">Сэр, для ответов на вопросы нужен API-ключ Gemini. Откройте Настройки ⚙ и вставьте ключ — получить его можно бесплатно на aistudio.google.com/apikey</string>
+    <string name="api_key_hint">API-ключ Gemini</string>
+    <string name="api_key_desc">Ключ хранится только на вашем телефоне. Получить бесплатно: aistudio.google.com/apikey</string>
+    <string name="model">Модель</string>
+    <string name="tts_on">Голосовые ответы (озвучка)</string>
+    <string name="wake_on">Служба «Джарвис» (голосовая активация)</string>
+    <string name="wake_desc">Работает в фоне: скажите «Джарвис» — ассистент проснётся и начнёт слушать команду. Расход батареи повышенный.</string>
+    <string name="check_key">Проверить ключ</string>
+    <string name="key_ok">Ключ работает! ✔</string>
+    <string name="key_bad">Ключ не принят: %s</string>
+    <string name="contacts_perm">Доступ к контактам</string>
+    <string name="contacts_perm_desc">Нужно для команд «позвони…» и «напиши…»</string>
+    <string name="about">J.A.R.V.I.S. — голосовой ассистент для Android.\nОфлайн-команды работают без интернета; для вопросов — API Gemini.</string>
+    <string name="mic_error">Распознавание речи недоступно: %s</string>
+    <string name="save">Сохранить</string>
+</resources>
