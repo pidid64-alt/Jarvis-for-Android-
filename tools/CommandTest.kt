@@ -126,6 +126,19 @@ fun main() {
     check("«какая модель телефона» — про устройство", true,
         reply("какая модель телефона")?.contains("Android"))
 
+    println("== Шумоподавление (чистый разбор команд) ==")
+    // Сама команда трогает Prefs и аудиоэффекты (на JVM — «Stub!»), поэтому
+    // тестируем разбор фразы; он должен отличать приказ от вопроса и не
+    // перехватывать чужие команды.
+    check("включить", true, CommandEngine.noiseRequest("включи шумоподавление"))
+    check("выключить", false, CommandEngine.noiseRequest("выключи шумоподавление"))
+    check("врубить (разговорное)", true, CommandEngine.noiseRequest("вруби шумодав"))
+    check("вопрос о состоянии — не приказ", null, CommandEngine.noiseRequest("шумоподавление включено"))
+    check("чужая команда не перехвачена", null, CommandEngine.noiseRequest("включи музыку"))
+    check("команда службы не перехвачена", null, CommandEngine.noiseRequest("выключи прослушивание"))
+    check("тост-подсказка знает про шумоподавление", true,
+        CommandEngine.help("system")?.contains("шумоподавление"))
+
     println("== Прочее ==")
     // Команды, которые возвращают Intent (перевод, поиск, запуск окон), здесь
     // не проверить: android.jar — заглушка, конструктор Intent бросает «Stub!».

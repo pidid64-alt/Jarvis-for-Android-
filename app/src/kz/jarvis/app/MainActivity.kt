@@ -45,6 +45,12 @@ class MainActivity : Activity() {
     private var speech: SpeechRecognizer? = null
     private var listening = false
 
+    /** Попыток переподключить микрофон после сбоя (сбрасывается при успехе). */
+    private var micRetries = 0
+
+    /** Поколение попыток: новая сессия отменяет отложенный автоповтор. */
+    private var listenGen = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -75,7 +81,13 @@ class MainActivity : Activity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        orb.setOnClickListener { if (listening) stopListening() else startListening() }
+        orb.setOnClickListener {
+            if (listening) stopListening()
+            else {
+                micRetries = 0
+                startListening()
+            }
+        }
 
         etInput.inputType = InputType.TYPE_CLASS_TEXT
         etInput.setOnEditorActionListener { _, _, _ -> sendTyped(); true }
@@ -298,10 +310,20 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Распознавание речи недоступно на этом устройстве", Toast.LENGTH_LONG).show()
             return
         }
+        AudioFx.sync(this)
         tts.stop()
-        speech?.destroy()
-        speech = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(listener)
+        listenGen++
+        try { speech?.destroy() } catch (e: Exception) { }
+        speech = try {
+            SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(listener)
+            }
+        } catch (e: Exception) {
+            // распознаватель может не создаться (сервис Google перезапускается) — повторим
+            if (!retryMic("распознаватель недоступен")) {
+                setStatus(getString(R.string.status_idle))
+            }
+            return
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -316,6 +338,7 @@ class MainActivity : Activity() {
     }
 
     private fun stopListening() {
+        listenGen++   // отменяем отложенные автоповторы
         try {
             speech?.stopListening()
         } catch (e: Exception) { }
@@ -324,8 +347,40 @@ class MainActivity : Activity() {
         orb.state = OrbView.State.IDLE
     }
 
+    /**
+     * Микрофон «сбросился» (занят другим приложением, сбой аудио, клиентская
+     * ошибка распознавателя) — пробуем переподключиться пару раз молча.
+     * Возвращает true, если повтор запланирован.
+     */
+    private fun retryMic(cause: String): Boolean {
+        if (micRetries >= 2 || busy || isFinishing || isDestroyed) return false
+        micRetries++
+        val gen = listenGen
+        setStatus(getString(R.string.status_reconnecting, cause))
+        ui.postDelayed({
+            // пользователь успел что-то нажать или запустить новую сессию — не мешаем
+            if (listening || gen != listenGen || busy || isFinishing || isDestroyed) return@postDelayed
+            startListening()
+        }, 600)
+        return true
+    }
+
+    /** Человекочитаемое имя ошибки распознавания — для тоста. */
+    private fun micErrorName(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "микрофон занят другим приложением"
+        SpeechRecognizer.ERROR_AUDIO -> "сбой захвата звука"
+        SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_NETWORK -> "нет сети"
+        SpeechRecognizer.ERROR_CLIENT -> "сбой клиента распознавания"
+        SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_SERVER_DISCONNECTED ->
+            "ошибка на сервере распознавания"
+        else -> error.toString()
+    }
+
     private val listener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onReadyForSpeech(params: Bundle?) {
+            micRetries = 0   // микрофон работает — счётчик сбоев обнуляем
+        }
+
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
@@ -337,15 +392,33 @@ class MainActivity : Activity() {
             when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                     setStatus(getString(R.string.status_idle))
-                else -> {
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
                     setStatus(getString(R.string.status_idle))
-                    if (error != SpeechRecognizer.ERROR_CLIENT) {
+                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10)
+                }
+                // технические сбои: микрофон мог «сброситься» — тихо переподключаемся
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                SpeechRecognizer.ERROR_AUDIO,
+                SpeechRecognizer.ERROR_CLIENT,
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+                SpeechRecognizer.ERROR_NETWORK,
+                SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> {
+                    if (!retryMic(micErrorName(error))) {
+                        setStatus(getString(R.string.status_idle))
                         Toast.makeText(
                             this@MainActivity,
-                            getString(R.string.mic_error, error.toString()),
+                            getString(R.string.mic_error, micErrorName(error)),
                             Toast.LENGTH_SHORT
                         ).show()
                     }
+                }
+                else -> {
+                    setStatus(getString(R.string.status_idle))
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.mic_error, micErrorName(error)),
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }

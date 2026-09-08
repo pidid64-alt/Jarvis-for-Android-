@@ -29,6 +29,8 @@ class SettingsActivity : Activity() {
     private lateinit var tvModelHint: TextView
     private lateinit var swTts: Switch
     private lateinit var swWake: Switch
+    private lateinit var swNoise: Switch
+    private lateinit var tvNoiseDesc: TextView
     private lateinit var tvBgStatus: TextView
 
     /** Провайдер, чьи настройки сейчас показаны в полях. */
@@ -47,6 +49,8 @@ class SettingsActivity : Activity() {
         tvModelHint = findViewById(R.id.tvModelHint)
         swTts = findViewById(R.id.swTts)
         swWake = findViewById(R.id.swWake)
+        swNoise = findViewById(R.id.swNoise)
+        tvNoiseDesc = findViewById(R.id.tvNoiseDesc)
         tvBgStatus = findViewById(R.id.tvBgStatus)
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
@@ -86,6 +90,16 @@ class SettingsActivity : Activity() {
         swWake.isChecked = Prefs.wakeOn(this)
 
         swTts.setOnCheckedChangeListener { _, checked -> Prefs.setTtsOn(this, checked) }
+
+        // --- шумоподавление микрофона ---
+        AudioFx.sync(this)
+        swNoise.isChecked = Prefs.noiseSuppress(this)
+        refreshNoiseStatus()
+        swNoise.setOnCheckedChangeListener { _, checked ->
+            Prefs.setNoiseSuppress(this, checked)
+            AudioFx.sync(this)
+            refreshNoiseStatus()
+        }
 
         swWake.setOnCheckedChangeListener { _, checked ->
             if (checked) {
@@ -191,8 +205,23 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         swWake.isChecked = Prefs.wakeOn(this)
+        swNoise.isChecked = Prefs.noiseSuppress(this)
+        refreshNoiseStatus()
         refreshBgStatus()
         if (Prefs.wakeOn(this)) WakeWordService.start(this)
+    }
+
+    /** Строка-статус под переключателем: что реально работает на этом устройстве. */
+    private fun refreshNoiseStatus() {
+        tvNoiseDesc.text = when {
+            !Prefs.noiseSuppress(this) ->
+                getString(R.string.noise_desc) + "\n" + getString(R.string.noise_off)
+            AudioFx.activeNames().isNotEmpty() ->
+                getString(R.string.noise_desc) + "\n" +
+                    getString(R.string.noise_working, AudioFx.activeNames().joinToString(", "))
+            else ->
+                getString(R.string.noise_desc) + "\n" + getString(R.string.noise_not_supported)
+        }
     }
 
     private fun refreshBgStatus() {
