@@ -116,8 +116,11 @@ object Research {
 
         val where = store(c, plan.topic, deck)
         val note = if (failed(raw)) " Модель не ответила (${raw.take(90)}), собрал черновик сам." else ""
+        // Путь в голосовом докладе не произносим: «Загрузки/Jarvis/…» звучит
+        // как «…Джарвис…», и фоновая служба ловила собственное wake-слово
+        // посреди доклада. Точное имя файла — в уведомлении и в окне приложения.
         val place = if (where.isEmpty()) " Файл сохранить не вышло — текст в буфере обмена."
-        else " Файл: $where."
+        else " Слайды сохранены в «Загрузки»."
         if (where.isEmpty()) ClaudeBridge.copy(c, Deck.markdown(deck))
 
         Conversation.add("Презентация «${deck.title}» на ${deck.slides.size} слайдов готова.", false)

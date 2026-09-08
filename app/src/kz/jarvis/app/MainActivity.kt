@@ -218,7 +218,9 @@ class MainActivity : Activity() {
                     var answer = "Не получилось, сэр."
                     try {
                         outcome.async(this) { answer = it }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
+                        // ловим всё, включая Error: падение фонового потока
+                        // убило бы всё приложение прямо во время озвучки
                         answer = "Ошибка: ${e.message?.take(80) ?: "неизвестно"}"
                     }
                     ui.post {
