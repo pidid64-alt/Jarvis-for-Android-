@@ -62,7 +62,7 @@ class MainActivity : Activity() {
         orb = findViewById(R.id.orb)
         btnWake = findViewById(R.id.btnWake)
 
-        tts = TtsController(this) { st ->
+        tts = TtsController(this, { st ->
             ui.post {
                 if (st == TtsController.STATE_SPEAKING) {
                     setStatus(getString(R.string.status_speaking))
@@ -72,7 +72,7 @@ class MainActivity : Activity() {
                     orb.state = OrbView.State.IDLE
                 }
             }
-        }
+        })
         tts.enabled = Prefs.ttsOn(this)
 
         findViewById<ImageView>(R.id.btnSend).setOnClickListener { sendTyped() }
@@ -128,6 +128,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         tts.enabled = Prefs.ttsOn(this)
+        tts.refresh()   // голос могли поменять в настройках
         refreshWakeIcon()
         WakeWordService.notifyUi(this, true)
         ensureWakeService()
@@ -207,6 +208,9 @@ class MainActivity : Activity() {
                 }
             }
             if (outcome.async != null) {
+                // долгая операция (поиск, Клод, презентация) — сначала докладываем,
+                // что взялись за дело, и только потом уходим в сеть
+                if (outcome.reply.isNotBlank()) deliver(outcome.reply, remember = false)
                 busy = true
                 setStatus(getString(R.string.status_thinking))
                 orb.state = OrbView.State.THINKING

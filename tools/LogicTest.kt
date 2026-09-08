@@ -1,6 +1,7 @@
 package kz.jarvis.tools
 
 import kz.jarvis.app.DateFacts
+import kz.jarvis.app.Deck
 import kz.jarvis.app.LifeCalc
 import kz.jarvis.app.LlmRequests
 import kz.jarvis.app.Persona
@@ -11,7 +12,10 @@ import kz.jarvis.app.TextTools
 import kz.jarvis.app.TimeParse
 import kz.jarvis.app.Timezones
 import kz.jarvis.app.Units
+import kz.jarvis.app.ResearchPlan
+import kz.jarvis.app.VoiceProfile
 import kz.jarvis.app.WakeWords
+import kz.jarvis.app.WebSearch
 import java.util.Calendar
 import kotlin.random.Random
 
@@ -272,6 +276,189 @@ fun main() {
     check("последняя реплика — от пользователя", true,
         LlmRequests.openAiBody("m", "s", long, "вопрос").endsWith(
             "{\"role\":\"user\",\"content\":\"вопрос\"}],\"temperature\":0.7,\"max_tokens\":600}"))
+
+
+    // =========================================================== голос Джарвиса
+    println("== Голос ==")
+    check("профиль по умолчанию", "jarvis", VoiceProfile.byId(null).id)
+    check("профиль джарвиса ниже обычного", true, VoiceProfile.byId("jarvis").pitch < 1f)
+    check("неизвестный профиль → джарвис", "jarvis", VoiceProfile.byId("нет такого").id)
+    check("профилей пять", 5, VoiceProfile.ALL.size)
+    check("границы тона снизу", VoiceProfile.PITCH_MIN, VoiceProfile.clampPitch(0.1f))
+    check("границы тона сверху", VoiceProfile.PITCH_MAX, VoiceProfile.clampPitch(9f))
+    check("границы скорости", VoiceProfile.RATE_MAX, VoiceProfile.clampRate(5f))
+
+    check("мужской голос по имени", true, VoiceProfile.looksMasculine("ru-ru-x-rum-local"))
+    check("женский голос по имени", true, VoiceProfile.looksFeminine("ru-RU-Standard-A#female_1"))
+    check("женский не считается мужским", false, VoiceProfile.looksMasculine("ru-ru-x-female-local"))
+
+    val voices = listOf(
+        VoiceProfile.VoiceInfo("ru-ru-x-ruf-local", "ru_RU", 400, false),
+        VoiceProfile.VoiceInfo("ru-ru-x-rum-local", "ru_RU", 400, false),
+        VoiceProfile.VoiceInfo("en-us-x-sfg-local", "en_US", 500, false)
+    )
+    check("для Джарвиса выбираем мужской", "ru-ru-x-rum-local",
+        VoiceProfile.bestVoice(voices, VoiceProfile.byId("jarvis")))
+    check("для Пятницы выбираем женский", "ru-ru-x-ruf-local",
+        VoiceProfile.bestVoice(voices, VoiceProfile.byId("friday")))
+    check("английский голос не годится", true,
+        VoiceProfile.scoreVoice("en-us-x-sfg-local", "en_US", 500, false,
+            VoiceProfile.byId("jarvis")) < -100)
+    check("офлайн-голос лучше сетевого", true,
+        VoiceProfile.scoreVoice("ru-ru-x-rum-local", "ru_RU", 300, false, VoiceProfile.byId("jarvis")) >
+            VoiceProfile.scoreVoice("ru-ru-x-rum-network", "ru_RU", 300, true, VoiceProfile.byId("jarvis")))
+
+    fun voiceCmd(s: String): String = when (val c = VoiceProfile.parse(s)) {
+        null -> "нет"
+        is VoiceProfile.Cmd.Set -> "профиль:${c.id}"
+        is VoiceProfile.Cmd.Pitch -> if (c.delta < 0) "тон:ниже" else "тон:выше"
+        is VoiceProfile.Cmd.Rate -> if (c.delta < 0) "темп:медленнее" else "темп:быстрее"
+        VoiceProfile.Cmd.Reset -> "сброс"
+        VoiceProfile.Cmd.Test -> "проверка"
+        VoiceProfile.Cmd.Info -> "инфо"
+        VoiceProfile.Cmd.Settings -> "настройки"
+    }
+    check("голос джарвиса", "профиль:jarvis", voiceCmd("включи голос джарвиса"))
+    check("голос брони", "профиль:stark", voiceCmd("голос брони"))
+    check("деловой голос", "профиль:agent", voiceCmd("деловой голос"))
+    check("женский голос", "профиль:friday", voiceCmd("женский голос"))
+    check("обычный голос", "профиль:classic", voiceCmd("обычный голос"))
+    check("говори ниже", "тон:ниже", voiceCmd("говори ниже"))
+    check("говори быстрее", "темп:быстрее", voiceCmd("говори быстрее"))
+    check("говори медленнее", "темп:медленнее", voiceCmd("говори медленнее"))
+    check("сброс голоса", "сброс", voiceCmd("сбрось голос"))
+    check("проверь голос", "проверка", voiceCmd("проверь голос"))
+    check("какой у тебя голос", "инфо", voiceCmd("какой у тебя голос"))
+    check("настройки голоса", "настройки", voiceCmd("смени голос"))
+    check("не про голос", "нет", voiceCmd("включи фонарик"))
+    check("громче — это громкость, не голос", "нет", voiceCmd("сделай громче"))
+
+    // ============================================== поиск, Клод и презентации
+    println("== Поиск и презентации ==")
+    fun plan(s: String): String {
+        val p = ResearchPlan.parse(s) ?: return "нет"
+        return "${p.kind}|${p.topic}|${p.slides}|${p.viaClaudeApp}"
+    }
+    check("поищи инфу и презентация", "PRESENTATION|квантовые компьютеры|8|false",
+        plan("поищи инфу про квантовые компьютеры и сделай презентацию"))
+    check("сделай презентацию на 12 слайдов", "PRESENTATION|марс|12|false",
+        plan("сделай презентацию про марс на 12 слайдов"))
+    check("доклад", "PRESENTATION|нейросети в медицине|8|false",
+        plan("подготовь доклад о нейросетях в медицине").replace("нейросетях в медицине", "нейросети в медицине"))
+    check("поиск без презентации", "RESEARCH|рынок кофе в казахстане|8|false",
+        plan("поищи информацию про рынок кофе в казахстане"))
+    check("презентация через клод", true,
+        (ResearchPlan.parse("сделай презентацию про марс через клод")?.viaClaudeApp) == true)
+    check("вопрос клоду", "CLAUDE|как настроить роутер|8|false",
+        plan("спроси у клода как настроить роутер"))
+    check("открой презентацию", "OPEN_LAST||8|false", plan("открой презентацию"))
+    check("обычный поиск не трогаем", "нет", plan("найди пиццу"))
+    check("команда телефона не трогается", "нет", plan("включи фонарик"))
+    check("погода не трогается", "нет", plan("какая погода в алматы"))
+
+    check("число слайдов по умолчанию", 8, ResearchPlan.slidesCount("сделай презентацию про марс"))
+    check("число слайдов из фразы", 15, ResearchPlan.slidesCount("презентация на 15 слайдов"))
+    check("слайдов не больше максимума", ResearchPlan.MAX_SLIDES,
+        ResearchPlan.slidesCount("презентация на 90 слайдов"))
+    check("тема без мусора", "искусственный интеллект",
+        ResearchPlan.cleanTopic("поищи мне инфу про искусственный интеллект и сделай презентацию"))
+    check("тема без хвоста про слайды", "древний рим",
+        ResearchPlan.cleanTopic("сделай презентацию про древний рим на 10 слайдов"))
+    check("запросов к поиску три", 3, ResearchPlan.searchQueries("марс").size)
+    check("в промпте есть тема и формат", true,
+        ResearchPlan.deckPrompt("марс", "выжимка", 7).contains("СЛАЙД:") &&
+            ResearchPlan.deckPrompt("марс", "выжимка", 7).contains("марс"))
+    check("сообщение для приложения Клода", true,
+        ResearchPlan.claudeAppMessage("марс", "выжимка", 7, true).contains("презентацию на 7 слайдов"))
+
+    // ------------------------------------------------------------- слайды
+    val modelAnswer = """
+        ЗАГОЛОВОК: Квантовые компьютеры
+        ПОДЗАГОЛОВОК: Что это и зачем нужно
+        СЛАЙД: Что это такое
+        - Считают на кубитах, а не на битах
+        - Кубит хранит суперпозицию состояний
+        ЗАМЕТКА: Начните с бытовой аналогии.
+        СЛАЙД: Где применяют
+        - Химия и материалы
+        - Криптография
+        - Логистика
+        ИТОГ: Технология молодая, но уже меняет расчёты.
+    """.trimIndent()
+    val deck = Deck.parse("квантовые компьютеры", modelAnswer,
+        listOf(Deck.Source("Википедия", "https://ru.wikipedia.org/wiki/Тест")))
+    check("слайдов разобрано", 2, deck.slides.size)
+    check("заголовок презентации", "Квантовые компьютеры", deck.title)
+    check("подзаголовок", "Что это и зачем нужно", deck.subtitle)
+    check("название первого слайда", "Что это такое", deck.slides[0].title)
+    check("пунктов на первом слайде", 2, deck.slides[0].bullets.size)
+    check("заметка докладчику", "Начните с бытовой аналогии.", deck.slides[0].note)
+    check("пунктов на втором слайде", 3, deck.slides[1].bullets.size)
+    check("итог", "Технология молодая, но уже меняет расчёты.", deck.summary)
+    check("презентация валидна", true, deck.ok)
+
+    val markdownDeck = Deck.parse("тест", "## Первый слайд\n* пункт один\n* пункт два\n## Второй\n- ещё пункт")
+    check("markdown-формат тоже понимаем", 2, markdownDeck.slides.size)
+    check("звёздочки как пункты", 2, markdownDeck.slides[0].bullets.size)
+
+    val html = Deck.html(deck)
+    check("html самодостаточен", true, html.startsWith("<!DOCTYPE html>") && html.contains("</html>"))
+    check("html содержит слайды", true, html.contains("Что это такое") && html.contains("Где применяют"))
+    check("html экранирует опасное", "&lt;b&gt;x&lt;/b&gt;", Deck.esc("<b>x</b>"))
+    check("markdown содержит источники", true, Deck.markdown(deck).contains("## Источники"))
+    check("озвучка короткая и по делу", true,
+        Deck.speech(deck).startsWith("Готово, сэр.") && Deck.speech(deck).contains("2 слайдов"))
+    check("имя файла транслитом", "kvantovye-kompyutery", Deck.slug("Квантовые компьютеры"))
+    check("имя файла без пустоты", "prezentaciya", Deck.slug("!!!"))
+
+    // ------------------------------------------------------- разбор выдачи
+    println("== Разбор поисковой выдачи ==")
+    val wikiJson = """{"query":{"pages":{"42":{"pageid":42,"title":"Марс",
+        "extract":"Марс — четвёртая планета от Солнца."}}}}""".trimIndent()
+    val wiki = WebSearch.parseWikipedia(wikiJson)
+    check("википедия: одна статья", 1, wiki.size)
+    check("википедия: заголовок", "Марс", wiki[0].title)
+    check("википедия: текст", true, wiki[0].snippet.startsWith("Марс — четвёртая"))
+    check("википедия: ссылка", true, wiki[0].url.startsWith("https://ru.wikipedia.org/wiki/"))
+
+    val duckJson = """{"Heading":"Mars","AbstractText":"Mars is the fourth planet.",
+        "AbstractURL":"https://en.wikipedia.org/wiki/Mars","AbstractSource":"Wikipedia",
+        "RelatedTopics":[{"FirstURL":"https://duckduckgo.com/Phobos","Text":"Phobos - moon of Mars"}]}""".trimIndent()
+    val duck = WebSearch.parseDuckJson(duckJson)
+    check("duckduckgo: справка + связанное", 2, duck.size)
+    check("duckduckgo: заголовок", "Mars", duck[0].title)
+
+    val duckHtml = """<div class="result"><a rel="nofollow" class="result__a"
+        href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fmars&amp;rut=x">Марс &amp; спутники</a>
+        <a class="result__snippet" href="#">Планета <b>Марс</b> и её спутники.</a></div>""".trimIndent()
+    val hits = WebSearch.parseDuckHtml(duckHtml)
+    check("html-выдача: одна находка", 1, hits.size)
+    check("html-выдача: заголовок без тегов", "Марс & спутники", hits[0].title)
+    check("html-выдача: настоящая ссылка", "https://example.com/mars", hits[0].url)
+    check("html-выдача: домен как источник", "example.com", hits[0].source)
+    check("html-выдача: описание", "Планета Марс и её спутники.", hits[0].snippet)
+
+    check("редирект duckduckgo разворачивается", "https://ya.ru/x",
+        WebSearch.realUrl("//duckduckgo.com/l/?uddg=https%3A%2F%2Fya.ru%2Fx&amp;rut=1"))
+    check("html-сущности", "«тест» — да", WebSearch.unescapeHtml("&laquo;тест&raquo; &mdash; да"))
+    check("теги вырезаются", "жирный текст", WebSearch.stripTags("<b>жирный</b>  текст"))
+    check("json-экранирование", "строка\nдальше", WebSearch.jsonUnescape("строка\\nдальше"))
+
+    val digest = WebSearch.digest("марс", hits, "8 сентября 2025")
+    check("выжимка содержит тему", true, digest.contains("Тема запроса: марс"))
+    check("выжимка содержит ссылку", true, digest.contains("https://example.com/mars"))
+    check("выжимка ограничена по размеру", true, WebSearch.digest("t", hits, "", 40).length <= 200)
+
+    val draft = WebSearch.draft("марс", listOf(
+        WebSearch.Hit("Марс", "Марс — четвёртая планета Солнечной системы и вторая по малости. " +
+            "Атмосфера очень разрежена и состоит в основном из углекислого газа.",
+            "https://ru.wikipedia.org/wiki/Марс", "Википедия"),
+        WebSearch.Hit("Миссии", "К Марсу отправлено более сорока аппаратов разных стран мира. " +
+            "Успешными оказались меньше половины запусков за всю историю.",
+            "https://example.com/missions", "example.com")
+    ))
+    check("черновик собирается без модели", true, draft.ok)
+    check("в черновике есть источники", 2, draft.sources.size)
 
     println("")
     println("пройдено: $passed, провалено: $failed")

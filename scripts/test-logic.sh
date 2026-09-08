@@ -4,7 +4,8 @@
 #  Компилируются те же самые исходники, что попадают в APK:
 #    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Timezones,
 #                           Units,LifeCalc,DateFacts,TextTools,Randoms,
-#                           Persona,Providers,LlmRequests}.kt
+#                           Persona,Providers,LlmRequests,VoiceProfile,
+#                           ResearchPlan,Deck,WebSearch}.kt
 #  + тестовая обёртка tools/LogicTest.kt. Выполняется на JVM.
 #
 #  Требуется тот же тулчейн, что и для scripts/build-apk.sh
@@ -51,6 +52,10 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   "$ROOT/app/src/kz/jarvis/app/Persona.kt" \
   "$ROOT/app/src/kz/jarvis/app/Providers.kt" \
   "$ROOT/app/src/kz/jarvis/app/LlmRequests.kt" \
+  "$ROOT/app/src/kz/jarvis/app/VoiceProfile.kt" \
+  "$ROOT/app/src/kz/jarvis/app/ResearchPlan.kt" \
+  "$ROOT/app/src/kz/jarvis/app/Deck.kt" \
+  "$ROOT/app/src/kz/jarvis/app/WebSearch.kt" \
   "$ROOT/tools/LogicTest.kt" 2>&1 | grep -v "^WARNING" | grep -v "jansi" | grep -v "native" || true
 
 if [ -z "$(find "$OUT/classes" -name '*.class')" ]; then

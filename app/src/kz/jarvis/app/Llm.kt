@@ -33,6 +33,43 @@ object Llm {
         }
     }
 
+    /**
+     * Синхронный запрос со своим системным промптом — для долгих задач вроде
+     * «поищи инфу и сделай презентацию». Вызывать ТОЛЬКО из фонового потока.
+     *
+     * @param prefer провайдер, которого надо использовать вместо выбранного
+     *               (например, Claude — «отнеси материал в Клод»)
+     */
+    fun complete(
+        c: Context,
+        system: String,
+        text: String,
+        maxTokens: Int = 2000,
+        prefer: Providers.Provider? = null
+    ): String {
+        val p = prefer ?: Prefs.provider(c)
+        val key = Prefs.apiKey(c, p)
+        val model = Prefs.model(c, p)
+        val base = Prefs.baseUrl(c, p)
+        return when (p.api) {
+            Providers.Api.GEMINI -> GeminiClient.complete(base, key, model, system, text, maxTokens)
+            Providers.Api.OPENAI -> OpenAiClient.complete(base, key, model, system, text, maxTokens)
+            Providers.Api.ANTHROPIC -> AnthropicClient.complete(base, key, model, system, text, maxTokens)
+        }
+    }
+
+    /** Провайдер Claude, если у него есть ключ, — «сходить именно в Клод». */
+    fun claude(c: Context): Providers.Provider? {
+        val p = Providers.ALL.firstOrNull { it.api == Providers.Api.ANTHROPIC } ?: return null
+        return if (Prefs.apiKey(c, p).isNotEmpty()) p else null
+    }
+
+    /** Есть ли вообще рабочий провайдер (Claude, текущий или локальный). */
+    fun anyReady(c: Context): Boolean = claude(c) != null || ready(c)
+
+    /** Кто будет отвечать на тяжёлый запрос: Claude по ключу или текущий провайдер. */
+    fun worker(c: Context): Providers.Provider? = claude(c) ?: if (ready(c)) Prefs.provider(c) else null
+
     /** Хватает ли настроек, чтобы задать вопрос модели. */
     fun ready(c: Context): Boolean {
         val p = Prefs.provider(c)
