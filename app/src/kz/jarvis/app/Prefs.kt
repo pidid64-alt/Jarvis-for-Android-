@@ -8,6 +8,7 @@ object Prefs {
     private const val K_PROVIDER = "provider"
     private const val K_TTS = "tts_on"
     private const val K_WAKE = "wake_on"
+    private const val K_NOISE = "noise_suppressor"
     private const val K_HELLO = "said_hello"
     private const val K_SNOOZE = "snooze_until"
     private const val K_BOOT_HINT = "boot_hint_shown"
@@ -59,6 +60,13 @@ object Prefs {
     /** Голосовая активация по умолчанию включена: «Джарвис» должен работать всегда. */
     fun wakeOn(c: Context): Boolean = sp(c).getBoolean(K_WAKE, true)
     fun setWakeOn(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_WAKE, v).apply()
+
+    /**
+     * Шумоподавление микрофона (NoiseSuppressor + эхоподавление + автоусиление).
+     * По умолчанию включено; реально работает, если прошивка умеет эти эффекты.
+     */
+    fun noiseSuppress(c: Context): Boolean = sp(c).getBoolean(K_NOISE, true)
+    fun setNoiseSuppress(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_NOISE, v).apply()
 
     fun saidHello(c: Context): Boolean = sp(c).getBoolean(K_HELLO, false)
     fun setSaidHello(c: Context) = sp(c).edit().putBoolean(K_HELLO, true).apply()

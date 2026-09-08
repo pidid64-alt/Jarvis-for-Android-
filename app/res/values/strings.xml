@@ -4,6 +4,7 @@
     <string name="settings">Настройки</string>
     <string name="status_idle">Нажми на сферу или напиши</string>
     <string name="status_listening">Слушаю…</string>
+    <string name="status_reconnecting">Микрофон сбросился (%1$s) — переподключаюсь…</string>
     <string name="status_thinking">Думаю…</string>
     <string name="status_speaking">Говорю…</string>
     <string name="hint_input">Спроси или скомандуй…</string>
@@ -18,6 +19,11 @@
     <string name="tts_on">Голосовые ответы (озвучка)</string>
     <string name="wake_on">Служба «Джарвис» (голосовая активация)</string>
     <string name="wake_desc">Работает в фоне: скажите «Джарвис» — ассистент услышит команду, ответит голосом и выполнит её, даже если приложение закрыто.</string>
+    <string name="noise_on">Шумоподавление микрофона</string>
+    <string name="noise_desc">Вычищает фоновый шум, эхо и делает речь громче — Джарвис лучше слышит команду в шумном месте. Даёт указание системным эффектам микрофона; реально работает, если прошивка их поддерживает.</string>
+    <string name="noise_working">Работает: %1$s.</string>
+    <string name="noise_not_supported">Прошивка не отдаёт аппаратных эффектов — на этом телефоне шумоподавление недоступно.</string>
+    <string name="noise_off">Выключено.</string>
     <string name="bg_title">Чтобы работало без приложения</string>
     <string name="bg_desc">Android ограничивает фоновые приложения. Три разрешения ниже делают ожидание слова «Джарвис» стабильным, а команды вроде «открой ютуб» — работающими при закрытом приложении.</string>
     <string name="bg_overlay">Показ поверх других окон</string>

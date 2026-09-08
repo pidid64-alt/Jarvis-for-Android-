@@ -46,6 +46,7 @@ class WakeWordService : Service() {
 
         const val ACTION_SPEAK = "kz.jarvis.app.action.SPEAK"
         const val ACTION_RESUME = "kz.jarvis.app.action.RESUME"
+        const val ACTION_UI_ACTIVE = "kz.jarvis.app.action.UI_ACTIVE"
         const val ACTION_OFF = "kz.jarvis.app.action.OFF"
         const val EXTRA_TEXT = "kz.jarvis.app.extra.TEXT"
 
@@ -83,14 +84,21 @@ class WakeWordService : Service() {
             } catch (e: Exception) { }
         }
 
-        /** Сообщить службе, что окно открылось/закрылось. */
+        /**
+         * Сообщить службе, что окно открылось/закрылось. Когда окно открыто,
+         * служба сразу освобождает микрофон — им владеет окно, и два
+         * распознавателя не конфликтуют (иначе микрофон «сбрасывается»).
+         * Выключенную вручную службу не воскрешаем.
+         */
         fun notifyUi(c: Context, visible: Boolean) {
             uiActive = visible
-            if (!visible) {
-                try {
-                    c.startService(Intent(c, WakeWordService::class.java).setAction(ACTION_RESUME))
-                } catch (e: Exception) { }
-            }
+            if (!Prefs.wakeOn(c)) return
+            try {
+                c.startService(
+                    Intent(c, WakeWordService::class.java)
+                        .setAction(if (visible) ACTION_UI_ACTIVE else ACTION_RESUME)
+                )
+            } catch (e: Exception) { }
         }
     }
 
@@ -109,6 +117,18 @@ class WakeWordService : Service() {
     private var lastCallback = System.currentTimeMillis()
     private var snoozeUntil = 0L
     private var errorStreak = 0
+
+    /** Поколение перезапусков: новый restartListening отменяет старые отложенные. */
+    private var listenGen = 0
+
+    /** Сколько раз подряд распознаватель умер молча (без колбэков). */
+    private var silentDrops = 0
+
+    /** Показали ли уведомление «микрофон сбрасывался» (чтобы вернуть «в строю»). */
+    private var noticedMicDrop = false
+
+    /** Показали ли «микрофон выключен в системе». */
+    private var noticedMicMute = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -133,6 +153,15 @@ class WakeWordService : Service() {
             ACTION_RESUME -> {
                 if (running && !snoozed() && speech == null) restartListening(200)
             }
+            ACTION_UI_ACTIVE -> {
+                // окно приложения открылось — отдаём ему микрофон немедленно,
+                // иначе два распознавателя дерутся и микрофон «сбрасывается»
+                if (running && mode == Mode.WAKE) {
+                    try { speech?.destroy() } catch (e: Exception) { }
+                    speech = null
+                    restartListening(3_000)
+                }
+            }
         }
 
         if (!running) {
@@ -143,6 +172,7 @@ class WakeWordService : Service() {
             running = true
             mode = Mode.WAKE
             snoozeUntil = Prefs.snoozeUntil(this)
+            AudioFx.sync(this)   // шумоподавление микрофона
             tone = try {
                 ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
             } catch (e: Exception) { null }
@@ -165,6 +195,8 @@ class WakeWordService : Service() {
         tts?.shutdown()
         tts = null
         overlay?.hide()
+        // служба умерла и окно закрыто — шумоподавление больше не нужно
+        if (!App.uiVisible) AudioFx.release()
         super.onDestroy()
     }
 
@@ -237,13 +269,30 @@ class WakeWordService : Service() {
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         }
 
+    /**
+     * Единственный способ (пере)запустить распознавание.
+     *
+     * Вызовы «гоняются по поколениям»: каждый новый вызов отменяет все прежние
+     * отложенные перезапуски, поэтому копии распознавателя не плодятся и
+     * микрофон не дёргается попусту (раньше отложенные циклы накапливались —
+     * после закрытия окна приложения залпом создавались десятки распознавателей
+     * и микрофон «сбрасывался»).
+     */
     private fun restartListening(delay: Long = 300) {
         if (!running) return
+        val gen = ++listenGen
         ui.postDelayed({
-            if (!running) return@postDelayed
+            if (!running || gen != listenGen) return@postDelayed
             if (speaking) { restartListening(500); return@postDelayed }
             if (snoozed()) { restartListening(5_000); return@postDelayed }
-            if (uiActive && mode == Mode.WAKE) { restartListening(2_000); return@postDelayed }
+            if (uiActive && mode == Mode.WAKE) {
+                // окно приложения открыто и само владеет микрофоном — не мешаем,
+                // но если микрофон остался у нас, освобождаем
+                try { speech?.destroy() } catch (e: Exception) { }
+                speech = null
+                restartListening(3_000)
+                return@postDelayed
+            }
             try { speech?.destroy() } catch (e: Exception) { }
             speech = null
             if (!SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -263,7 +312,12 @@ class WakeWordService : Service() {
         }, delay)
     }
 
-    /** Страховка от «залипшего» распознавателя. */
+    /**
+     * Страховка от «залипшего» распознавателя: иногда он умирает молча (сервис
+     * Google обновился, микрофон перехватило другое приложение, аудиотракт
+     * перезапустился) — колбэков нет, ошибок нет. Тогда поднимаем заново,
+     * с нарастающей паузой, чтобы не долбить систему.
+     */
     private val watchdog = object : Runnable {
         override fun run() {
             if (!running) return
@@ -272,11 +326,36 @@ class WakeWordService : Service() {
             val idle = System.currentTimeMillis() - lastCallback
             when {
                 snoozed() -> { /* спим */ }
-                mode == Mode.WAKE && idle > 15_000 -> restartListening(0)
+                mode == Mode.WAKE && uiActive -> { /* микрофон у окна приложения */ }
+                mode == Mode.WAKE && idle > 15_000 -> {
+                    silentDrops++
+                    val delay = when {
+                        silentDrops <= 2 -> 0L
+                        silentDrops <= 5 -> 5_000L
+                        else -> 30_000L
+                    }
+                    if (silentDrops >= 2) {
+                        noticedMicDrop = true
+                        notifyState("Микрофон сбрасывался — перезапускаю прослушивание…")
+                    }
+                    restartListening(delay)
+                }
                 mode == Mode.COMMAND && idle > 18_000 -> {
                     say("Не расслышал, сэр.") { backToWake() }
                 }
             }
+            // микрофон выключили системным тумблером? Скажем об этом один раз
+            try {
+                val am = getSystemService(AudioManager::class.java) ?: return
+                if (am.isMicrophoneMute) {
+                    if (!noticedMicMute) {
+                        noticedMicMute = true
+                        notifyState("Микрофон выключен в системе — включите его, сэр")
+                    }
+                } else {
+                    noticedMicMute = false
+                }
+            } catch (e: Exception) { }
         }
     }
 
@@ -456,6 +535,13 @@ class WakeWordService : Service() {
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             lastCallback = System.currentTimeMillis()
+            silentDrops = 0
+            errorStreak = 0
+            if (noticedMicDrop) {
+                // микрофон сбрасывался, но мы его вернули — сообщаем
+                noticedMicDrop = false
+                notifyState("Микрофон снова в строю — слушаю слово «Джарвис»")
+            }
         }
 
         override fun onBeginningOfSpeech() {
@@ -490,6 +576,7 @@ class WakeWordService : Service() {
         override fun onResults(results: Bundle?) {
             lastCallback = System.currentTimeMillis()
             errorStreak = 0
+            silentDrops = 0
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (mode == Mode.WAKE) {
                 var hit = false
@@ -521,9 +608,23 @@ class WakeWordService : Service() {
                 return
             }
             errorStreak++
+            // микрофон перехватило другое приложение или аудиотракт перезапустился
+            val micTrouble = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                    error == SpeechRecognizer.ERROR_AUDIO ||
+                    error == SpeechRecognizer.ERROR_CLIENT
+            if (micTrouble && errorStreak >= 2) {
+                noticedMicDrop = true
+                notifyState(
+                    if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY)
+                        "Микрофон занят другим приложением — пробую вернуть…"
+                    else
+                        "Микрофон сбрасывался — переподключаюсь…"
+                )
+            }
             val delay = when {
                 error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 900L
-                errorStreak > 6 -> { errorStreak = 0; 10_000L }
+                error == SpeechRecognizer.ERROR_AUDIO -> 2_500L
+                errorStreak > 6 -> { errorStreak = 0; 15_000L }
                 else -> 500L
             }
             if (mode == Mode.COMMAND && errorStreak > 2) backToWake() else restartListening(delay)
