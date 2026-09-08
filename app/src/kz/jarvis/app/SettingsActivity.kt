@@ -9,10 +9,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
@@ -33,6 +35,24 @@ class SettingsActivity : Activity() {
     private lateinit var tvNoiseDesc: TextView
     private lateinit var tvBgStatus: TextView
 
+    // --- голос ---
+    private lateinit var spVoice: Spinner
+    private lateinit var tvVoiceDesc: TextView
+    private lateinit var spVoiceName: Spinner
+    private lateinit var tvPitch: TextView
+    private lateinit var sbPitch: SeekBar
+    private lateinit var tvRate: TextView
+    private lateinit var sbRate: SeekBar
+    private lateinit var swVoiceFx: Switch
+    private lateinit var swClaudeApp: Switch
+    private lateinit var tvClaudeDesc: TextView
+
+    /** Своя озвучка — чтобы дать послушать голос прямо в настройках. */
+    private var tts: TtsController? = null
+
+    /** Имена системных голосов в том же порядке, что и в списке выбора. */
+    private var voiceNames: List<String> = listOf("")
+
     /** Провайдер, чьи настройки сейчас показаны в полях. */
     private var activeProvider: Providers.Provider? = null
 
@@ -52,6 +72,19 @@ class SettingsActivity : Activity() {
         swNoise = findViewById(R.id.swNoise)
         tvNoiseDesc = findViewById(R.id.tvNoiseDesc)
         tvBgStatus = findViewById(R.id.tvBgStatus)
+        spVoice = findViewById(R.id.spVoice)
+        tvVoiceDesc = findViewById(R.id.tvVoiceDesc)
+        spVoiceName = findViewById(R.id.spVoiceName)
+        tvPitch = findViewById(R.id.tvPitch)
+        sbPitch = findViewById(R.id.sbPitch)
+        tvRate = findViewById(R.id.tvRate)
+        sbRate = findViewById(R.id.sbRate)
+        swVoiceFx = findViewById(R.id.swVoiceFx)
+        swClaudeApp = findViewById(R.id.swClaudeApp)
+        tvClaudeDesc = findViewById(R.id.tvClaudeDesc)
+
+        setupVoice()
+        setupResearch()
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -292,6 +325,158 @@ class SettingsActivity : Activity() {
     override fun onPause() {
         saveFields()
         super.onPause()
+    }
+
+    // ------------------------------------------------------------------ голос
+
+    private fun setupVoice() {
+        spVoice.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, VoiceProfile.names()
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spVoice.setSelection(VoiceProfile.indexOf(Prefs.voiceId(this)))
+        tvVoiceDesc.text = Prefs.voiceProfile(this).hint
+
+        spVoice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+                val chosen = VoiceProfile.ALL[pos]
+                if (chosen.id == Prefs.voiceId(this@SettingsActivity)) {
+                    tvVoiceDesc.text = chosen.hint
+                    return
+                }
+                Prefs.setVoiceId(this@SettingsActivity, chosen.id)
+                Prefs.setVoiceName(this@SettingsActivity, "")
+                Voice.changed()
+                tvVoiceDesc.text = chosen.hint
+                showTone()
+                fillVoiceNames()
+                tts?.refresh()
+                speakSample()
+            }
+
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+
+        showTone()
+        sbPitch.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, value: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                Prefs.setVoicePitch(this@SettingsActivity, VoiceProfile.PITCH_MIN + value / 100f)
+                Voice.changed()
+                labelTone()
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                tts?.refresh()
+                speakSample()
+            }
+        })
+        sbRate.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, value: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                Prefs.setVoiceRate(this@SettingsActivity, VoiceProfile.RATE_MIN + value / 100f)
+                Voice.changed()
+                labelTone()
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                tts?.refresh()
+                speakSample()
+            }
+        })
+
+        swVoiceFx.isChecked = Prefs.voiceFx(this)
+        swVoiceFx.setOnCheckedChangeListener { _, checked ->
+            Prefs.setVoiceFx(this, checked)
+            Voice.syncFx(this)
+            Voice.changed()
+            if (checked && !Voice.fxWorks()) {
+                Toast.makeText(this, "Прошивка не дала эффект эха, сэр", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        findViewById<Button>(R.id.btnVoiceTest).setOnClickListener {
+            tts?.refresh()
+            speakSample()
+        }
+
+        // движок TTS поднимается не мгновенно — список голосов заполняем по готовности
+        tts = TtsController(this, { }, { runOnUiThread { fillVoiceNames() } })
+    }
+
+    private fun showTone() {
+        sbPitch.progress = ((Prefs.voicePitch(this) - VoiceProfile.PITCH_MIN) * 100).toInt()
+            .coerceIn(0, sbPitch.max)
+        sbRate.progress = ((Prefs.voiceRate(this) - VoiceProfile.RATE_MIN) * 100).toInt()
+            .coerceIn(0, sbRate.max)
+        labelTone()
+    }
+
+    private fun labelTone() {
+        tvPitch.text = getString(R.string.voice_pitch, fmt(Prefs.voicePitch(this)))
+        tvRate.text = getString(R.string.voice_rate, fmt(Prefs.voiceRate(this)))
+    }
+
+    private fun fmt(v: Float): String = String.format(java.util.Locale.US, "%.2f", v)
+
+    private fun speakSample() {
+        if (!Prefs.ttsOn(this)) {
+            Toast.makeText(this, "Озвучка выключена — включите «Голосовые ответы»", Toast.LENGTH_SHORT).show()
+            return
+        }
+        tts?.speak(VoiceProfile.sampleText())
+    }
+
+    /** Заполняет список системных голосов телефона. */
+    private fun fillVoiceNames() {
+        val pairs = tts?.systemVoices() ?: listOf("" to "Авто — Джарвис выберет сам")
+        voiceNames = pairs.map { it.first }
+        spVoiceName.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, pairs.map { it.second }
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        val saved = Prefs.voiceName(this)
+        spVoiceName.setSelection(voiceNames.indexOf(saved).coerceAtLeast(0))
+        spVoiceName.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+                val name = voiceNames.getOrElse(pos) { "" }
+                if (name == Prefs.voiceName(this@SettingsActivity)) return
+                Prefs.setVoiceName(this@SettingsActivity, name)
+                Voice.changed()
+                tts?.refresh()
+                speakSample()
+            }
+
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+    }
+
+    // ------------------------------------------------- поиск и презентации
+
+    private fun setupResearch() {
+        swClaudeApp.isChecked = Prefs.claudeApp(this)
+        refreshClaudeDesc()
+        swClaudeApp.setOnCheckedChangeListener { _, checked ->
+            Prefs.setClaudeApp(this, checked)
+            refreshClaudeDesc()
+        }
+        findViewById<Button>(R.id.btnOpenDeck).setOnClickListener {
+            Toast.makeText(this, DeckFile.openLast(this), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun refreshClaudeDesc() {
+        val app = if (ClaudeBridge.installed(this)) "Приложение Claude найдено на телефоне."
+        else "Приложения Claude нет — открою claude.ai в браузере."
+        val api = if (Llm.claude(this) != null) "Ключ Anthropic указан: могу работать и без приложения."
+        else "Ключа Anthropic нет — материал уйдёт в приложение или на сайт."
+        tvClaudeDesc.text = getString(R.string.claude_app_desc) + "\n" + app + " " + api
+    }
+
+    override fun onDestroy() {
+        tts?.shutdown()
+        tts = null
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(

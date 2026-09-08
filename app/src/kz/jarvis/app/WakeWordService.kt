@@ -113,6 +113,9 @@ class WakeWordService : Service() {
     private var running = false
     private var mode = Mode.WAKE
     @Volatile private var speaking = false
+
+    /** Идёт долгая работа (поиск в интернете, Клод, сборка презентации). */
+    @Volatile private var working = false
     private var lastTrigger = 0L
     private var lastCallback = System.currentTimeMillis()
     private var snoozeUntil = 0L
@@ -173,10 +176,11 @@ class WakeWordService : Service() {
             mode = Mode.WAKE
             snoozeUntil = Prefs.snoozeUntil(this)
             AudioFx.sync(this)   // шумоподавление микрофона
+            Voice.syncFx(this)   // эффект «брони» для голоса, если включён
             tone = try {
                 ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
             } catch (e: Exception) { null }
-            tts = TtsController(this) { }
+            tts = TtsController(this, { })
             tts?.enabled = Prefs.ttsOn(this)
             overlay = OverlayController(this)
             ui.postDelayed({ restartListening() }, 250)
@@ -195,6 +199,7 @@ class WakeWordService : Service() {
         tts?.shutdown()
         tts = null
         overlay?.hide()
+        Voice.releaseFx()
         // служба умерла и окно закрыто — шумоподавление больше не нужно
         if (!App.uiVisible) AudioFx.release()
         super.onDestroy()
@@ -322,7 +327,7 @@ class WakeWordService : Service() {
         override fun run() {
             if (!running) return
             ui.postDelayed(this, WATCHDOG_MS)
-            if (speaking) return
+            if (speaking || working) return
             val idle = System.currentTimeMillis() - lastCallback
             when {
                 snoozed() -> { /* спим */ }
@@ -433,6 +438,10 @@ class WakeWordService : Service() {
                 return
             }
             if (outcome.async != null) {
+                // сначала голосом подтверждаем, что взялись за дело
+                if (outcome.reply.isNotBlank()) say(outcome.reply)
+                working = true
+                notifyState("Работаю над запросом…")
                 Thread {
                     var answer = "Не получилось, сэр."
                     try {
@@ -440,7 +449,10 @@ class WakeWordService : Service() {
                     } catch (e: Exception) {
                         answer = "Ошибка: ${e.message?.take(80) ?: "неизвестно"}"
                     }
-                    ui.post { say(answer) { backToWake() } }
+                    ui.post {
+                        working = false
+                        say(answer) { backToWake() }
+                    }
                 }.start()
                 return
             }
@@ -457,8 +469,10 @@ class WakeWordService : Service() {
             return
         }
         Conversation.add(text, true)
+        working = true
         Llm.chatAsync(this, Conversation.history(), text) { answer ->
             ui.post {
+                working = false
                 Conversation.add(answer, false)
                 say(answer) { backToWake() }
             }

@@ -37,6 +37,8 @@ object Speaker {
                     return@TextToSpeech
                 }
                 t.language = Locale("ru", "RU")
+                // тот же тембр, что и в диалоге: профиль «Джарвис» и его настройки
+                try { Voice.apply(ctx.applicationContext, t) } catch (e: Exception) { }
                 t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) = done(t)

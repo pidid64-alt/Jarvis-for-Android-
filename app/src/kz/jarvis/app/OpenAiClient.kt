@@ -43,18 +43,34 @@ object OpenAiClient {
         e.message ?: "ошибка сети"
     }
 
+    /** Синхронный запрос со своим системным промптом (для презентаций). */
+    fun complete(
+        baseUrl: String,
+        key: String,
+        model: String,
+        system: String,
+        text: String,
+        maxTokens: Int
+    ): String = try {
+        chat(baseUrl, key, model, emptyList(), text, system, maxTokens)
+    } catch (e: Exception) {
+        "Сэр, связь с сервером оборвалась: ${e.message ?: "неизвестная ошибка"}"
+    }
+
     private fun chat(
         baseUrl: String,
         key: String,
         model: String,
         history: List<Pair<Boolean, String>>,
-        text: String
+        text: String,
+        system: String = Persona.SYSTEM_PROMPT,
+        maxTokens: Int = 600
     ): String {
         val conn = URL(LlmRequests.openAiUrl(baseUrl)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 15000
-            conn.readTimeout = 60000
+            conn.readTimeout = 120000
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             if (key.isNotBlank()) {
@@ -62,7 +78,7 @@ object OpenAiClient {
                 conn.setRequestProperty("x-api-key", key) // часть прокси читает именно его
             }
 
-            val bytes = LlmRequests.openAiBody(model, Persona.SYSTEM_PROMPT, history, text)
+            val bytes = LlmRequests.openAiBody(model, system, history, text, maxTokens)
                 .toByteArray(Charsets.UTF_8)
             conn.setFixedLengthStreamingMode(bytes.size)
             conn.outputStream.use { it.write(bytes) }

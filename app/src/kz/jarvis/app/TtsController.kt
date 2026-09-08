@@ -5,21 +5,36 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
-class TtsController(context: Context, private val onState: (Int) -> Unit) :
-    TextToSpeech.OnInitListener {
+/**
+ * Озвучка ответов. Тембр берётся из [Voice]: профиль «Джарвис» (низкий тон),
+ * «Броня», «Агент», «Пятница» или системный голос без обработки.
+ *
+ * Если настройки голоса поменялись (голосовой командой или в настройках),
+ * [Voice.revision] увеличивается — и следующая фраза звучит уже по-новому,
+ * перезапускать службу не нужно.
+ */
+class TtsController(
+    context: Context,
+    private val onState: (Int) -> Unit,
+    /** Вызывается, когда движок поднялся: список голосов уже доступен. */
+    private val onReady: () -> Unit = {}
+) : TextToSpeech.OnInitListener {
 
     companion object {
         const val STATE_IDLE = 0
         const val STATE_SPEAKING = 1
     }
 
+    private val ctx = context.applicationContext
     private var tts: TextToSpeech? = null
+    private var appliedRevision = -1
+
     var ready = false
         private set
     var enabled = true
 
     init {
-        tts = TextToSpeech(context.applicationContext, this)
+        tts = TextToSpeech(ctx, this)
     }
 
     override fun onInit(status: Int) {
@@ -28,14 +43,29 @@ class TtsController(context: Context, private val onState: (Int) -> Unit) :
                     it != TextToSpeech.LANG_MISSING_DATA && it != TextToSpeech.LANG_NOT_SUPPORTED
                 } == true)
         if (!ready) tts?.language = Locale.US
+        refresh()
+        try { onReady() } catch (e: Exception) { }
     }
 
+    /** Применяет текущий профиль голоса (можно звать сколько угодно). */
+    fun refresh() {
+        val t = tts ?: return
+        try {
+            Voice.apply(ctx, t)
+            appliedRevision = Voice.revision
+        } catch (e: Exception) { }
+    }
+
+    /** Список системных голосов для экрана настроек. */
+    fun systemVoices(): List<Pair<String, String>> = Voice.list(tts)
+
     fun speak(text: String, onDone: () -> Unit = {}) {
-        val t = text.take(900)
+        val t = text.take(1200)
         if (!ready || !enabled || t.isBlank()) {
             onDone()
             return
         }
+        if (appliedRevision != Voice.revision) refresh()
         val id = "jarvis_${System.currentTimeMillis()}"
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {

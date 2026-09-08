@@ -54,6 +54,29 @@ object Notify {
         } catch (e: Exception) { /* нет разрешения на уведомления */ }
     }
 
+    /** Готовая презентация: нажатие открывает файл. */
+    fun deck(c: Context, title: String, saved: DeckFile.Saved) {
+        val uri = saved.uri ?: return
+        val open = PendingIntent.getActivity(
+            c, 5,
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "text/html")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n: Notification = Notification.Builder(c, CH_REMINDERS)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle("Презентация готова: $title")
+            .setContentText(saved.where)
+            .setStyle(Notification.BigTextStyle().bigText("Сохранил в ${saved.where}. Нажмите, чтобы открыть."))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(78, n)
+        } catch (e: Exception) { }
+    }
+
     /** Подсказка после перезагрузки: микрофон-службу нельзя поднять из фона. */
     fun needRestart(c: Context) {
         val open = PendingIntent.getActivity(
