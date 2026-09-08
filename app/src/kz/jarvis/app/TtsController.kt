@@ -69,16 +69,30 @@ class TtsController(
         val id = "jarvis_${System.currentTimeMillis()}"
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
+                SpeechState.begin()
                 onState(STATE_SPEAKING)
             }
 
             override fun onDone(utteranceId: String?) {
+                SpeechState.end()
                 onState(STATE_IDLE)
                 onDone()
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
+                SpeechState.end()
+                onState(STATE_IDLE)
+                onDone()
+            }
+
+            /**
+             * Фразу прервали (QUEUE_FLUSH, «стоп», shutdown). Без этого
+             * колбэка состояние «говорю» залипало навсегда: сфера в окне
+             * не возвращалась в «слушаю», а служба не отпускала микрофон.
+             */
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                SpeechState.end()
                 onState(STATE_IDLE)
                 onDone()
             }
@@ -87,11 +101,13 @@ class TtsController(
     }
 
     fun stop() {
+        SpeechState.end()
         tts?.stop()
         onState(STATE_IDLE)
     }
 
     fun shutdown() {
+        SpeechState.end()
         tts?.stop()
         tts?.shutdown()
         tts = null

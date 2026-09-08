@@ -22,6 +22,7 @@ object Speaker {
         val finished = AtomicBoolean(false)
         fun done(t: TextToSpeech?) {
             if (!finished.compareAndSet(false, true)) return
+            SpeechState.end()   // микрофон службы снова может слушать
             try {
                 t?.shutdown()
             } catch (e: Exception) { }
@@ -40,10 +41,14 @@ object Speaker {
                 // тот же тембр, что и в диалоге: профиль «Джарвис» и его настройки
                 try { Voice.apply(ctx.applicationContext, t) } catch (e: Exception) { }
                 t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
+                    override fun onStart(utteranceId: String?) = SpeechState.begin()
+
                     override fun onDone(utteranceId: String?) = done(t)
+
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) = done(t)
+
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) = done(t)
                 })
                 t.speak(text.take(600), TextToSpeech.QUEUE_FLUSH, null, "jarvis_once")
             }
@@ -51,7 +56,10 @@ object Speaker {
             done(instance)
             return
         }
-        // страховка: если движок TTS завис — освобождаем ресурсы и колбэк
-        Handler(Looper.getMainLooper()).postDelayed({ done(instance) }, 15_000)
+        // страховка: если движок TTS завис — освобождаем ресурсы и колбэк.
+        // Таймер зависит от длины текста: длинное напоминание звучит дольше
+        // 15 секунд, и раньше фраза обрывалась на середине.
+        val fuseMs = 15_000L + 110L * text.take(600).length
+        Handler(Looper.getMainLooper()).postDelayed({ done(instance) }, fuseMs)
     }
 }

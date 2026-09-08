@@ -288,7 +288,9 @@ class WakeWordService : Service() {
         val gen = ++listenGen
         ui.postDelayed({
             if (!running || gen != listenGen) return@postDelayed
-            if (speaking) { restartListening(500); return@postDelayed }
+            // говорит ли кто-то из Джарвисов (окно, служба, напоминание) —
+            // микрофон в это время не включаем: услышим собственный голос
+            if (speaking || SpeechState.speaking()) { restartListening(500); return@postDelayed }
             if (snoozed()) { restartListening(5_000); return@postDelayed }
             if (uiActive && mode == Mode.WAKE) {
                 // окно приложения открыто и само владеет микрофоном — не мешаем,
@@ -327,7 +329,7 @@ class WakeWordService : Service() {
         override fun run() {
             if (!running) return
             ui.postDelayed(this, WATCHDOG_MS)
-            if (speaking || working) return
+            if (speaking || working || SpeechState.speaking()) return
             val idle = System.currentTimeMillis() - lastCallback
             when {
                 snoozed() -> { /* спим */ }
@@ -367,6 +369,10 @@ class WakeWordService : Service() {
     // ------------------------------------------------------------ пробуждение
 
     private fun onWake(): Boolean {
+        // Джарвис сам сейчас говорит (доклад о презентации, напоминание,
+        // ответ из окна приложения) — микрофон поймал его собственный голос,
+        // а не человека. Это не пробуждение.
+        if (SpeechState.speaking()) return true
         val now = System.currentTimeMillis()
         if (now - lastTrigger < 3_500) return true // недавно срабатывали — молчим
         lastTrigger = now
@@ -446,7 +452,10 @@ class WakeWordService : Service() {
                     var answer = "Не получилось, сэр."
                     try {
                         outcome.async(this) { answer = it }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
+                        // ловим всё, включая Error: фоновый поток не должен
+                        // уронить процесс — иначе приложение вылетит прямо
+                        // посреди озвучки приветствия
                         answer = "Ошибка: ${e.message?.take(80) ?: "неизвестно"}"
                     }
                     ui.post {
@@ -577,6 +586,10 @@ class WakeWordService : Service() {
                 if (!t.isNullOrBlank()) overlay?.update("«$t»")
                 return
             }
+            // во время любой озвучки всё услышанное — эхо собственного голоса:
+            // wake-слово «Джарвис» в докладе (например, в пути к файлу
+            // «Загрузки/Jarvis/…») не должно будить службу посреди фразы
+            if (SpeechState.speaking()) return
             val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
             for (t in texts) {
                 if (t != null && WakeWords.contains(t)) {
@@ -594,7 +607,9 @@ class WakeWordService : Service() {
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (mode == Mode.WAKE) {
                 var hit = false
-                if (texts != null) for (t in texts) if (t != null && WakeWords.contains(t)) hit = true
+                if (!SpeechState.speaking()) {
+                    if (texts != null) for (t in texts) if (t != null && WakeWords.contains(t)) hit = true
+                }
                 if (hit) onWake() else restartListening(150)
             } else {
                 val text = texts?.firstOrNull { !it.isNullOrBlank() }
