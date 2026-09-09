@@ -563,6 +563,9 @@ class WakeWordService : Service() {
                 closeAfterReply = true
                 launchActivity(false)
             }
+            if (outcome.endDialog) {
+                closeAfterReply = true
+            }
 
             if (outcome.stopWake) {
                 Prefs.setWakeOn(this, false)

@@ -55,6 +55,9 @@ class SettingsActivity : Activity() {
     private lateinit var tvNotifDesc: TextView
     private lateinit var btnAutoDiag: Button
     private lateinit var btnAutoLog: Button
+    private lateinit var btnAutoSend: Button
+    private lateinit var tvAutoSendStatus: TextView
+    private lateinit var swCallSim: Switch
     private lateinit var swAutoScreen: Switch
     private lateinit var swAutoLoc: Switch
     private lateinit var swAutoVoice: Switch
@@ -102,6 +105,9 @@ class SettingsActivity : Activity() {
         tvNotifDesc = findViewById(R.id.tvNotifDesc)
         btnAutoDiag = findViewById(R.id.btnAutoDiag)
         btnAutoLog = findViewById(R.id.btnAutoLog)
+        btnAutoSend = findViewById(R.id.btnAutoSend)
+        tvAutoSendStatus = findViewById(R.id.tvAutoSendStatus)
+        swCallSim = findViewById(R.id.swCallSim)
         swAutoScreen = findViewById(R.id.swAutoScreen)
         swAutoLoc = findViewById(R.id.swAutoLoc)
         swAutoVoice = findViewById(R.id.swAutoVoice)
@@ -110,6 +116,7 @@ class SettingsActivity : Activity() {
         setupVoice()
         setupResearch()
         setupAssistantModes()
+        setupExternalActions()
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -264,8 +271,10 @@ class SettingsActivity : Activity() {
         super.onResume()
         swWake.isChecked = Prefs.wakeOn(this)
         swNoise.isChecked = Prefs.noiseSuppress(this)
+        swCallSim.isChecked = Prefs.callSimFirst(this)
         refreshNoiseStatus()
         refreshAutoDesc()
+        refreshAutoSendStatus()
         refreshBgStatus()
         if (Prefs.wakeOn(this)) WakeWordService.start(this)
     }
@@ -386,6 +395,35 @@ class SettingsActivity : Activity() {
         btnAutoLog.setOnClickListener { showAutoLog() }
 
         refreshAutoDesc()
+    }
+
+    /** Музыка/видео и отправка в WhatsApp: системные доступы и настройка звонков. */
+    private fun setupExternalActions() {
+        refreshAutoSendStatus()
+
+        btnAutoSend.setOnClickListener {
+            safeStart(AutoSend.openSettings(this))
+        }
+
+        swCallSim.isChecked = Prefs.callSimFirst(this)
+        swCallSim.setOnCheckedChangeListener { _, checked ->
+            Prefs.setCallSimFirst(this, checked)
+            val txt = if (checked) {
+                "Звонки теперь всегда с первой SIM — системный вопрос больше не появится."
+            } else {
+                "При звонке система снова спросит, какой SIM звонить."
+            }
+            Toast.makeText(this, txt, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Статус сервиса автоотправки (спец. возможности). */
+    private fun refreshAutoSendStatus() {
+        tvAutoSendStatus.text = if (AutoSend.enabled(this)) {
+            getString(R.string.auto_send_on)
+        } else {
+            getString(R.string.auto_send_off)
+        }
     }
 
     /** Показывает последние строки журнала автоответчика в окне. */

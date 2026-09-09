@@ -232,6 +232,7 @@ class MainActivity : Activity() {
             if (outcome.async != null) {
                 // долгая операция (поиск, Клод, презентация) — сначала докладываем,
                 // что взялись за дело, и только потом уходим в сеть
+                if (outcome.endDialog) lastInputVoice = false  // уходим в ютуб/вацап — микрофон не переоткрываем
                 if (outcome.reply.isNotBlank()) deliver(outcome.reply, remember = false)
                 busy = true
                 setStatus(getString(R.string.status_thinking))
@@ -558,6 +559,15 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Без микрофона голос не работает — пишите текстом", Toast.LENGTH_LONG).show()
             }
             11 -> if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toggleWake()
+            43 -> if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(
+                    this,
+                    "Доступ к телефону выдан ✔ — теперь звоню всегда с первой SIM",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                Toast.makeText(this, "SIM не выбрана — при звонке система спросит сама", Toast.LENGTH_LONG).show()
+            }
         }
     }
 }

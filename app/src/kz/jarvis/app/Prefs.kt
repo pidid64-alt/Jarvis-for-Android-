@@ -16,6 +16,9 @@ object Prefs {
     // непрерывный диалог
     private const val K_FOLLOW = "follow_up"
 
+    // звонки: всегда выбирать первую SIM, когда их две
+    private const val K_CALL_SIM = "call_sim_first"
+
     // автоответчик в мессенджерах
     private const val K_AUTO = "auto_reply"
     private const val K_AUTO_SCREEN = "auto_reply_screen_off"
@@ -110,6 +113,12 @@ object Prefs {
      */
     fun followUp(c: Context): Boolean = sp(c).getBoolean(K_FOLLOW, true)
     fun setFollowUp(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_FOLLOW, v).apply()
+
+    // ------------------------------------------------------------- звонки
+
+    /** Две SIM: при звонке всегда выбирать первую (SIM 1), без системного вопроса. */
+    fun callSimFirst(c: Context): Boolean = sp(c).getBoolean(K_CALL_SIM, true)
+    fun setCallSimFirst(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_CALL_SIM, v).apply()
 
     // ---------------------------------------------------------- автоответчик
 

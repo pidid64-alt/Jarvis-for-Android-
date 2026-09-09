@@ -2,6 +2,7 @@ package kz.jarvis.tools
 
 import kz.jarvis.app.AssistantModes
 import kz.jarvis.app.AutoReplyLogic
+import kz.jarvis.app.ChatMedia
 import kz.jarvis.app.DateFacts
 import kz.jarvis.app.Deck
 import kz.jarvis.app.LifeCalc
@@ -555,6 +556,41 @@ fun main() {
         AutoReplyLogic.allowed(listOf(nowMs - 1_000, nowMs - 2_000, nowMs - 3_000, nowMs - 4_000), nowMs))
     check("лимит: старые не считаются", true,
         AutoReplyLogic.allowed(listOf(nowMs - 120_000, nowMs - 61_000), nowMs))
+
+    println("== WhatsApp: разбор «напиши … в вацап» ==")
+    fun wa(name: String, msg: ChatMedia.WaMsg?, expName: String, expBody: String) {
+        check(name, expName, msg?.name)
+        check(name + " (текст)", expBody, msg?.body)
+    }
+    check("это про вацап", true, ChatMedia.isWaPhrase("напиши маме в вацап: привет"))
+    check("это про ватсап", true, ChatMedia.isWaPhrase("отправь в ватсап папе привет"))
+    check("это про whatsapp", true, ChatMedia.isWaPhrase("напиши маме в whatsapp привет"))
+    check("смс — не вацап", false, ChatMedia.isWaPhrase("напиши маме смс привет"))
+    check("телеграм — не вацап", false, ChatMedia.isWaPhrase("напиши маме в телеграм привет"))
+    wa("текст после двоеточия", ChatMedia.parseWa("напиши маме в вацап: я уже еду"), "маме", "я уже еду")
+    wa("текст после «что»", ChatMedia.parseWa("напиши маме в вацап что я занят"), "маме", "я занят")
+    wa("вацап перед именем", ChatMedia.parseWa("отправь в вацап папе что я люблю его"), "папе", "я люблю его")
+    wa("текст сразу после имени", ChatMedia.parseWa("скажи маме в вацапе привет как дела"), "маме", "привет как дела")
+    wa("по вацапу", ChatMedia.parseWa("напиши маме по вацапу: скоро буду"), "маме", "скоро буду")
+    check("без текста — не разбор", null, ChatMedia.parseWa("напиши маме в вацап"))
+
+    println("== YouTube и Spotify: чистый запрос ==")
+    check("ютуб: песня", "shape of you", ChatMedia.youtubeQuery("включи песню shape of you на ютубе"))
+    check("ютуб: видео после платформы", "как собрать стол",
+        ChatMedia.youtubeQuery("включи на ютубе видео как собрать стол"))
+    check("ютуб: клип", "despacito", ChatMedia.youtubeQuery("поставь клип despacito на ютубе"))
+    check("ютуб: просто открыть", "", ChatMedia.youtubeQuery("включи ютуб"))
+    check("не ютуб", null, ChatMedia.youtubeQuery("включи музыку"))
+    check("спотифай: песня", "джаз", ChatMedia.spotifyQuery("включи джаз в спотифае"))
+    check("спотифай: открыть", "", ChatMedia.spotifyQuery("открой спотифай"))
+    check("спотифай: нет платформы", null, ChatMedia.spotifyQuery("включи песню на ютубе"))
+
+    println("== WhatsApp: номер в международный вид ==")
+    check("8 771 234-56-78", "77712345678", ChatMedia.phoneForWa("8 771 234-56-78"))
+    check("+7 771 234 56 78", "77712345678", ChatMedia.phoneForWa("+7 771 234 56 78"))
+    check("местный 10 цифр", "77712345678", ChatMedia.phoneForWa("7712345678"))
+    check("сломанный номер", null, ChatMedia.phoneForWa("номер не найден"))
+    check("пусто", null, ChatMedia.phoneForWa(""))
 
     println("")
     println("пройдено: $passed, провалено: $failed")
