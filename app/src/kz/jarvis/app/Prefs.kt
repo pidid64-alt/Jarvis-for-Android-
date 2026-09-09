@@ -13,6 +13,16 @@ object Prefs {
     private const val K_SNOOZE = "snooze_until"
     private const val K_BOOT_HINT = "boot_hint_shown"
 
+    // непрерывный диалог
+    private const val K_FOLLOW = "follow_up"
+
+    // автоответчик в мессенджерах
+    private const val K_AUTO = "auto_reply"
+    private const val K_AUTO_SCREEN = "auto_reply_screen_off"
+    private const val K_AUTO_LOC = "auto_reply_location"
+    private const val K_AUTO_VOICE = "auto_reply_voice"
+    private const val K_AUTO_RULES = "auto_reply_rules"
+
     // голос
     private const val K_VOICE = "voice_profile"
     private const val K_PITCH = "voice_pitch"
@@ -90,6 +100,50 @@ object Prefs {
 
     fun bootHintShown(c: Context): Boolean = sp(c).getBoolean(K_BOOT_HINT, false)
     fun setBootHintShown(c: Context) = sp(c).edit().putBoolean(K_BOOT_HINT, true).apply()
+
+    // --------------------------------------------------------- непрерывный диалог
+
+    /**
+     * После ответа Джарвис продолжает слушать следующую реплику без нового
+     * «Джарвис» и возвращается к ожиданию слова только после тишины.
+     */
+    fun followUp(c: Context): Boolean = sp(c).getBoolean(K_FOLLOW, true)
+    fun setFollowUp(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_FOLLOW, v).apply()
+
+    // ---------------------------------------------------------- автоответчик
+
+    /** Автоответчик в мессенджерах: по умолчанию выключен — включается явно. */
+    fun autoReply(c: Context): Boolean = sp(c).getBoolean(K_AUTO, false)
+    fun setAutoReply(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_AUTO, v).apply()
+
+    /** Отвечать, только когда экран выключен (владелец не читает чат сам). */
+    fun autoReplyScreenOff(c: Context): Boolean = sp(c).getBoolean(K_AUTO_SCREEN, true)
+    fun setAutoReplyScreenOff(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_AUTO_SCREEN, v).apply()
+
+    /** Подставлять геолокацию владельца, когда спрашивают «где ты». */
+    fun autoReplyLoc(c: Context): Boolean = sp(c).getBoolean(K_AUTO_LOC, true)
+    fun setAutoReplyLoc(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_AUTO_LOC, v).apply()
+
+    /** Озвучивать вслух, что Джарвис ответил (и о чём спрашивали). */
+    fun autoReplyVoice(c: Context): Boolean = sp(c).getBoolean(K_AUTO_VOICE, false)
+    fun setAutoReplyVoice(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_AUTO_VOICE, v).apply()
+
+    /** Личные правила владельца для автоответов («если зовут гулять — я занят»). */
+    fun autoReplyRules(c: Context): String = sp(c).getString(K_AUTO_RULES, "").orEmpty()
+    fun setAutoReplyRules(c: Context, v: String) =
+        sp(c).edit().putString(K_AUTO_RULES, v.trim()).apply()
+
+    /** Добавляет ещё одно правило автоответа (каждое с новой строки). */
+    fun addAutoReplyRule(c: Context, rule: String) {
+        val r = rule.trim().trimEnd('.', ',', '!', '?', ' ')
+        if (r.isBlank()) return
+        val all = (autoReplyRules(c) + "\n" + r).lines().filter { it.isNotBlank() }
+            .distinct().joinToString("\n")
+        setAutoReplyRules(c, all)
+    }
 
     // ------------------------------------------------------------------ голос
 

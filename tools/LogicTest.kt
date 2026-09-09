@@ -1,5 +1,7 @@
 package kz.jarvis.tools
 
+import kz.jarvis.app.AssistantModes
+import kz.jarvis.app.AutoReplyLogic
 import kz.jarvis.app.DateFacts
 import kz.jarvis.app.Deck
 import kz.jarvis.app.LifeCalc
@@ -459,6 +461,90 @@ fun main() {
     ))
     check("черновик собирается без модели", true, draft.ok)
     check("в черновике есть источники", 2, draft.sources.size)
+
+    println("== Непрерывный диалог ==")
+    check("включи непрерывный диалог", true, AssistantModes.dialogRequest("включи непрерывный диалог"))
+    check("выключи непрерывный диалог", false, AssistantModes.dialogRequest("выключи непрерывный диалог"))
+    check("вопрос о состоянии — не приказ", null,
+        AssistantModes.dialogRequest("непрерывный диалог включен?"))
+    check("не про диалог", null, AssistantModes.dialogRequest("расскажи анекдот"))
+    check("говорить подряд — про диалог", true,
+        AssistantModes.dialogRequest("включи говорить подряд"))
+    check("после ответа слушай без джарвис", true,
+        AssistantModes.dialogRequest("после ответа продолжай слушать без джарвис"))
+
+    println("== Автоответчик: разбор команд ==")
+    check("включи автоответ", AssistantModes.AutoReplyCommand.ON,
+        AssistantModes.autoReplyCommand("включи автоответ"))
+    check("выключи автоответ", AssistantModes.AutoReplyCommand.OFF,
+        AssistantModes.autoReplyCommand("выключи автоответ"))
+    check("выключи автоответчик", AssistantModes.AutoReplyCommand.OFF,
+        AssistantModes.autoReplyCommand("выключи автоответчик"))
+    check("статус-вопрос", AssistantModes.AutoReplyCommand.STATUS,
+        AssistantModes.autoReplyCommand("автоответчик работает?"))
+    check("что такое автоответчик — статус", AssistantModes.AutoReplyCommand.STATUS,
+        AssistantModes.autoReplyCommand("что такое автоответчик"))
+    check("отвечай за меня — включить", AssistantModes.AutoReplyCommand.ON,
+        AssistantModes.autoReplyCommand("отвечай за меня в мессенджерах"))
+    check("добавь правило", AssistantModes.AutoReplyCommand.RULES_ADD,
+        AssistantModes.autoReplyCommand("добавь правило: если зовут гулять — отвечай, что я занят"))
+    check("какие правила", AssistantModes.AutoReplyCommand.RULES_SHOW,
+        AssistantModes.autoReplyCommand("какие правила автоответа"))
+    check("очисти правила", AssistantModes.AutoReplyCommand.RULES_CLEAR,
+        AssistantModes.autoReplyCommand("очисти правила автоответа"))
+    check("не про автоответ (погода)", null,
+        AssistantModes.autoReplyCommand("какая погода"))
+    check("не про автоответ (правила без слова)", null,
+        AssistantModes.autoReplyCommand("покажи правила"))
+
+    println("== Автоответчик: правила и мессенджеры ==")
+    check("правило после двоеточия", "если зовут гулять — отвечай, что я занят",
+        AssistantModes.autoRuleText("добавь правило: если зовут гулять — отвечай, что я занят"))
+    check("правило после тире", "не отвечай маме после 22 часов",
+        AssistantModes.autoRuleText("добавь правило автоответа — не отвечай маме после 22 часов"))
+    check("правило без знака", "не соглашайся на встречи",
+        AssistantModes.autoRuleText("запомни правило не соглашайся на встречи"))
+    check("whatsapp в списке", "WhatsApp", AutoReplyLogic.messengerLabel("com.whatsapp"))
+    check("telegram в списке", "Telegram", AutoReplyLogic.messengerLabel("org.telegram.messenger"))
+    check("посторонний пакет", null, AutoReplyLogic.messengerLabel("com.example.app"))
+    check("контакт «Мама» найден", true,
+        AutoReplyLogic.isKnownPerson("Мама", listOf("Мама (дом)", "Папа")))
+    check("номер — личный чат", true,
+        AutoReplyLogic.isKnownPerson("+7 912 345-67-89", emptyList()))
+    check("группа не совпадает с контактами", false,
+        AutoReplyLogic.isKnownPerson("Семья и друзья", listOf("Мама")))
+    check("служебный мусор пропускаем", true,
+        AutoReplyLogic.shouldSkip("Мама", "🔒 Сообщения защищены сквозным шифрованием."))
+    check("обычный вопрос не мусор", false, AutoReplyLogic.shouldSkip("Мама", "ты где?"))
+    check("вопрос «где ты» распознан", true, AutoReplyLogic.asksLocation("мама пишет: ты где?"))
+    check("не-вопрос про место", false, AutoReplyLogic.asksLocation("пришли документы"))
+
+    println("== Автоответчик: ответ модели и лимиты ==")
+    check("json-ответ разобран", "Я скоро буду дома",
+        AutoReplyLogic.parseReply("{\"reply\": \"Я скоро буду дома\"}"))
+    check("json с пустым ответом", "", AutoReplyLogic.parseReply("{\"reply\": \"\"}"))
+    check("json в код-блоке", "нет", AutoReplyLogic.parseReply("```json\n{\"reply\": \"нет\"}\n```"))
+    check("ответ без json", "Конечно", AutoReplyLogic.parseReply("Конечно"))
+    check("экранированные кавычки в ответе", "он сказал \"ок\"",
+        AutoReplyLogic.parseReply("{\"reply\": \"он сказал \\\"ок\\\"\"}"))
+    check("отбивка мусора после json", "", AutoReplyLogic.parseReply("Подумаю. {\"reply\": \"\"} Надеюсь помог"))
+    check("чистка ответа убирает переносы", "да конечно",
+        AutoReplyLogic.cleanReply("да\n  конечно  "))
+    val prompt = AutoReplyLogic.decisionPrompt(
+        "Мама", listOf("ты дома?"), "если зовут гулять — говори, что занят",
+        "Местоположение владельца: Астана", "8 сентября 2025")
+    check("промпт знает собеседника", true, prompt.contains("Мама"))
+    check("промпт знает правила", true, prompt.contains("говори, что занят"))
+    check("промпт знает геолокацию", true, prompt.contains("Астана"))
+    check("промпт требует json", true, prompt.contains("\"reply\""))
+    val nowMs = System.currentTimeMillis()
+    check("лимит: пусто можно", true, AutoReplyLogic.allowed(emptyList(), nowMs))
+    check("лимит: 3 из 4 можно", true,
+        AutoReplyLogic.allowed(listOf(nowMs - 10_000, nowMs - 20_000, nowMs - 30_000), nowMs))
+    check("лимит: 4 из 4 нельзя", false,
+        AutoReplyLogic.allowed(listOf(nowMs - 1_000, nowMs - 2_000, nowMs - 3_000, nowMs - 4_000), nowMs))
+    check("лимит: старые не считаются", true,
+        AutoReplyLogic.allowed(listOf(nowMs - 120_000, nowMs - 61_000), nowMs))
 
     println("")
     println("пройдено: $passed, провалено: $failed")

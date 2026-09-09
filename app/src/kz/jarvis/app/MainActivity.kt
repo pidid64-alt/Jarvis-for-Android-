@@ -51,6 +51,12 @@ class MainActivity : Activity() {
     /** Поколение попыток: новая сессия отменяет отложенный автоповтор. */
     private var listenGen = 0
 
+    /** Последняя реплика пришла голосом — после ответа можно снова слушать. */
+    private var lastInputVoice = false
+
+    /** Сколько раз подряд распознавание «не услышало» в непрерывном диалоге. */
+    private var autoMisses = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -85,6 +91,7 @@ class MainActivity : Activity() {
             if (listening) stopListening()
             else {
                 micRetries = 0
+                autoMisses = 0
                 startListening()
             }
         }
@@ -163,16 +170,31 @@ class MainActivity : Activity() {
             return
         }
         etInput.setText("")
+        lastInputVoice = false   // печатали — микрофон сам открываться не будет
+        autoMisses = 0
         handleUser(t)
     }
 
     private fun handleUser(text: String) {
         if (text.isBlank() || busy) return
         val shown = WakeWords.removeFromText(text).ifBlank { text }
-        addMessage(shown, true)
         tts.stop()
 
         val norm = CommandEngine.normalize(shown)
+        // одно только «Джарвис» — команды нет: просто слушаем дальше
+        if (norm.isEmpty() || WakeWords.removeFromText(shown).isEmpty()) {
+            if (Prefs.followUp(this)) {
+                lastInputVoice = true
+                autoMisses = 0
+                maybeAutoListen()
+            } else {
+                setStatus(getString(R.string.status_idle))
+                orb.state = OrbView.State.IDLE
+            }
+            return
+        }
+
+        addMessage(shown, true)
         if (norm == "повтори" || norm == "скажи еще раз" || norm == "повтори еще раз") {
             val again = Conversation.lastReply.ifEmpty { "Пока мне нечего повторить, сэр." }
             deliver(again, remember = false)
@@ -255,11 +277,37 @@ class MainActivity : Activity() {
             Conversation.add(reply, false)
         }
         addMessage(reply, false)
-        if (!silent && Prefs.ttsOn(this)) tts.speak(reply)
-        else {
+        if (!silent && Prefs.ttsOn(this)) {
+            tts.speak(reply) { maybeAutoListen() }
+        } else {
             setStatus(getString(R.string.status_idle))
             orb.state = OrbView.State.IDLE
+            maybeAutoListen()
         }
+    }
+
+    /**
+     * Непрерывный диалог в окне: после произнесённого ответа снова открываем
+     * микрофон, чтобы следующую фразу можно было сказать без «Джарвис».
+     * Тишину «прощаем» пару раз, потом сфера снова ждёт нажатия.
+     */
+    private fun maybeAutoListen() {
+        if (isFinishing || isDestroyed) return
+        if (busy || listening) return
+        if (!Prefs.followUp(this) || !lastInputVoice) {
+            if (!listening) {
+                setStatus(getString(R.string.status_idle))
+                orb.state = OrbView.State.IDLE
+            }
+            return
+        }
+        val gen = listenGen
+        ui.postDelayed({
+            if (isFinishing || isDestroyed || busy || listening) return@postDelayed
+            if (gen != listenGen) return@postDelayed
+            if (!App.uiVisible) return@postDelayed   // окно ушло в фон — микрофон у службы
+            startListening()
+        }, 700)
     }
 
     // ---------------- чат UI ----------------
@@ -396,8 +444,26 @@ class MainActivity : Activity() {
             listening = false
             orb.state = OrbView.State.IDLE
             when (error) {
-                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                    setStatus(getString(R.string.status_idle))
+                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                    // непрерывный диалог: собеседник задумался — прощаем тишину
+                    // пару раз и снова открываем микрофон
+                    if (Prefs.followUp(this@MainActivity) && lastInputVoice && autoMisses < 2) {
+                        autoMisses++
+                        setStatus(getString(R.string.status_listening))
+                        ui.postDelayed({
+                            if (listening || busy || isFinishing || isDestroyed) return@postDelayed
+                            if (!App.uiVisible) return@postDelayed   // окно в фоне — микрофон у службы
+                            if (!Prefs.followUp(this@MainActivity) || !lastInputVoice || autoMisses > 2) {
+                                setStatus(getString(R.string.status_idle))
+                                return@postDelayed
+                            }
+                            startListening()
+                        }, 500)
+                    } else {
+                        lastInputVoice = false
+                        setStatus(getString(R.string.status_idle))
+                    }
+                }
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
                     setStatus(getString(R.string.status_idle))
                     requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10)
@@ -436,7 +502,11 @@ class MainActivity : Activity() {
             val text = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
-            if (!text.isNullOrBlank()) handleUser(text)
+            if (!text.isNullOrBlank()) {
+                lastInputVoice = true
+                autoMisses = 0
+                handleUser(text)
+            }
         }
 
         override fun onPartialResults(partialResults: Bundle?) {

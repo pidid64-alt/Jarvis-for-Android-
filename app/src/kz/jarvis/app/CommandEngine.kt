@@ -276,6 +276,8 @@ object CommandEngine {
             • «спроси у Клода как настроить роутер», «отправь это в Клод», «открой презентацию»
             • «голос Джарвиса», «голос брони», «женский голос», «говори ниже», «проверь голос»
             • «какой у тебя провайдер», «смени провайдера», «настройки Джарвиса»
+            • «включи непрерывный диалог» — говорить подряд, без повторного «Джарвис»
+            • «включи автоответ» — сам отвечу в WhatsApp/Telegram; «добавь правило: …»
             • «спи 10 минут», «стоп», «что ты умеешь»
             Подробности по темам: «команды конвертера», «команды телефона», «календарные команды»,
             «команды для текста», «команды-развлечения», «команды списков», «курсы валют»,
@@ -393,6 +395,8 @@ object CommandEngine {
 
     private fun serviceCmd(ctx: Context, s: String): Outcome? {
         noiseCmd(ctx, s)?.let { return it }
+        dialogCmd(ctx, s)?.let { return it }
+        autoReplyCmd(ctx, s)?.let { return it }
 
         Regex("(?:спи|спать|помолчи|отдохни|пауза|замолчи)\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?")
             .find(s)?.let { m ->
@@ -471,6 +475,126 @@ object CommandEngine {
         if (Regex("что такое|расскажи про|объясни|почему").containsMatchIn(s)) return null
 
         return Outcome("Скажите «включи шумоподавление» или «выключи шумоподавление», сэр.")
+    }
+
+    // --------------------------------------------------------- непрерывный диалог
+
+    /** «Включи/выключи непрерывный диалог», «непрерывный диалог включен?» */
+    private fun dialogCmd(ctx: Context, s: String): Outcome? {
+        if (!AssistantModes.isAboutDialog(s)) return null
+
+        AssistantModes.dialogRequest(s)?.let { want ->
+            Prefs.setFollowUp(ctx, want)
+            return Outcome(
+                if (want) {
+                    "Непрерывный диалог включён, сэр. После ответа я продолжаю слушать — " +
+                        "следующую фразу можно говорить без «Джарвис». " +
+                        "Вернусь к ожиданию слова после паузы в разговоре."
+                } else {
+                    "Непрерывный диалог выключен, сэр. Каждая команда теперь начинается со слова «Джарвис»."
+                }
+            )
+        }
+
+        if (Regex("включен|выключен|статус|состояние|работает|как сейчас|активен").containsMatchIn(s)) {
+            return Outcome(
+                if (Prefs.followUp(ctx)) {
+                    "Непрерывный диалог включён, сэр: после ответа скажите следующую фразу без «Джарвис»."
+                } else {
+                    "Непрерывный диалог выключен, сэр. Скажите «включи непрерывный диалог», чтобы говорить подряд."
+                }
+            )
+        }
+        // «что такое непрерывный диалог» — пусть отвечает ИИ
+        if (Regex("что такое|зачем|объясни|почему|расскажи про").containsMatchIn(s)) return null
+
+        return Outcome(
+            "Управление: «включи непрерывный диалог» или «выключи непрерывный диалог». " +
+                "В непрерывном диалоге после моего ответа можно сразу говорить следующее, без «Джарвис»."
+        )
+    }
+
+    // ---------------------------------------------------------- автоответчик
+
+    /** «Включи автоответ», «автоответчик работает?», «добавь правило автоответа …» */
+    private fun autoReplyCmd(ctx: Context, s: String): Outcome? {
+        if (!AssistantModes.isAboutAutoReply(s) && !AssistantModes.isRuleCommand(s)) return null
+        when (AssistantModes.autoReplyCommand(s)) {
+            AssistantModes.AutoReplyCommand.ON -> {
+                Prefs.setAutoReply(ctx, true)
+                return Outcome(autoReplyOnReply(ctx))
+            }
+            AssistantModes.AutoReplyCommand.OFF -> {
+                Prefs.setAutoReply(ctx, false)
+                return Outcome(
+                    "Автоответчик выключен, сэр. Входящие сообщения я больше не трогаю — " +
+                        "отвечайте сами."
+                )
+            }
+            AssistantModes.AutoReplyCommand.STATUS -> {
+                return Outcome(autoReplyStatusText(ctx))
+            }
+            AssistantModes.AutoReplyCommand.RULES_ADD -> {
+                val rule = AssistantModes.autoRuleText(s)
+                if (rule.isNullOrBlank()) {
+                    return Outcome(
+                        "Какую фразу запомнить, сэр? Скажите, например: «добавь правило: " +
+                            "если зовут гулять — отвечай, что я занят»."
+                    )
+                }
+                Prefs.addAutoReplyRule(ctx, rule)
+                return Outcome("Правило записано, сэр: «$rule».")
+            }
+            AssistantModes.AutoReplyCommand.RULES_SHOW -> {
+                val rules = Prefs.autoReplyRules(ctx)
+                return Outcome(
+                    if (rules.isBlank()) "Правил для автоответа пока нет, сэр."
+                    else "Правила автоответа, сэр: $rules"
+                )
+            }
+            AssistantModes.AutoReplyCommand.RULES_CLEAR -> {
+                Prefs.setAutoReplyRules(ctx, "")
+                return Outcome("Все правила автоответа удалены, сэр.")
+            }
+            null -> return null
+        }
+    }
+
+    private fun autoReplyOnReply(ctx: Context): String {
+        val extra = buildString {
+            if (!Llm.ready(ctx)) {
+                append(" Но для автоответов нужен настроенный провайдер ИИ — откройте «настройки Джарвиса» и впишите ключ.")
+            }
+            if (!AutoReplyService.isGranted(ctx)) {
+                append(" Дайте доступ к уведомлениям: «настройки Джарвиса» → «Автоответчик».")
+            }
+            if (!Prefs.autoReplyScreenOff(ctx)) {
+                append(" Отвечаю даже при включённом экране.")
+            }
+        }
+        return "Автоответчик включён, сэр. В мессенджерах я сам отвечаю на сообщения личных контактов" +
+            (if (Prefs.autoReplyScreenOff(ctx)) " (когда экран выключен)" else "") +
+            ", пока не скажете «выключи автоответ»." + extra
+    }
+
+    private fun autoReplyStatusText(ctx: Context): String {
+        if (!Prefs.autoReply(ctx)) {
+            return "Автоответчик сейчас выключен, сэр. Скажите «включи автоответ» — и я буду " +
+                "отвечать за вас в WhatsApp и Telegram, когда экран выключен."
+        }
+        val problems = ArrayList<String>()
+        if (!Llm.ready(ctx)) problems.add("нет ключа ИИ — впишите в «настройках Джарвиса»")
+        if (!AutoReplyService.isGranted(ctx)) {
+            problems.add("не выдан «доступ к уведомлениям» — кнопка в настройках Джарвиса")
+        }
+        val rules = Prefs.autoReplyRules(ctx)
+        return buildString {
+            append("Автоответчик включён, сэр.")
+            if (Prefs.autoReplyScreenOff(ctx)) append(" Отвечаю, когда экран выключен.")
+            else append(" Отвечаю и при включённом экране.")
+            if (problems.isNotEmpty()) append(" Но: ").append(problems.joinToString("; ")).append(".")
+            if (rules.isNotBlank()) append(" Правила: ").append(rules).append(".")
+        }
     }
 
     // ------------------------------------------------------ напоминания

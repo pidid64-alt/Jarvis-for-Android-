@@ -47,6 +47,17 @@ class SettingsActivity : Activity() {
     private lateinit var swClaudeApp: Switch
     private lateinit var tvClaudeDesc: TextView
 
+    // --- непрерывный диалог и автоответчик ---
+    private lateinit var swDialog: Switch
+    private lateinit var swAuto: Switch
+    private lateinit var tvAutoDesc: TextView
+    private lateinit var btnNotifAccess: Button
+    private lateinit var tvNotifDesc: TextView
+    private lateinit var swAutoScreen: Switch
+    private lateinit var swAutoLoc: Switch
+    private lateinit var swAutoVoice: Switch
+    private lateinit var etAutoRules: EditText
+
     /** Своя озвучка — чтобы дать послушать голос прямо в настройках. */
     private var tts: TtsController? = null
 
@@ -82,9 +93,19 @@ class SettingsActivity : Activity() {
         swVoiceFx = findViewById(R.id.swVoiceFx)
         swClaudeApp = findViewById(R.id.swClaudeApp)
         tvClaudeDesc = findViewById(R.id.tvClaudeDesc)
+        swDialog = findViewById(R.id.swDialog)
+        swAuto = findViewById(R.id.swAuto)
+        tvAutoDesc = findViewById(R.id.tvAutoDesc)
+        btnNotifAccess = findViewById(R.id.btnNotifAccess)
+        tvNotifDesc = findViewById(R.id.tvNotifDesc)
+        swAutoScreen = findViewById(R.id.swAutoScreen)
+        swAutoLoc = findViewById(R.id.swAutoLoc)
+        swAutoVoice = findViewById(R.id.swAutoVoice)
+        etAutoRules = findViewById(R.id.etAutoRules)
 
         setupVoice()
         setupResearch()
+        setupAssistantModes()
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -240,6 +261,7 @@ class SettingsActivity : Activity() {
         swWake.isChecked = Prefs.wakeOn(this)
         swNoise.isChecked = Prefs.noiseSuppress(this)
         refreshNoiseStatus()
+        refreshAutoDesc()
         refreshBgStatus()
         if (Prefs.wakeOn(this)) WakeWordService.start(this)
     }
@@ -287,6 +309,107 @@ class SettingsActivity : Activity() {
         false
     }
 
+    // ---------------------------------- непрерывный диалог и автоответчик
+
+    private fun setupAssistantModes() {
+        swDialog.isChecked = Prefs.followUp(this)
+        swDialog.setOnCheckedChangeListener { _, checked ->
+            Prefs.setFollowUp(this, checked)
+            if (checked) {
+                Toast.makeText(this, "Скажите «Джарвис» — и говорите дальше без повтора слова", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        swAuto.isChecked = Prefs.autoReply(this)
+        swAutoScreen.isChecked = Prefs.autoReplyScreenOff(this)
+        swAutoLoc.isChecked = Prefs.autoReplyLoc(this)
+        swAutoVoice.isChecked = Prefs.autoReplyVoice(this)
+        etAutoRules.setText(Prefs.autoReplyRules(this))
+        etAutoRules.hint = getString(R.string.autoreply_rules_hint)
+
+        swAuto.setOnCheckedChangeListener { _, checked ->
+            Prefs.setAutoReply(this, checked)
+            refreshAutoDesc()
+            if (checked && !AutoReplyService.isGranted(this)) {
+                Toast.makeText(
+                    this,
+                    "Теперь выдайте «Доступ к уведомлениям» (кнопка ниже), сэр",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        swAutoScreen.setOnCheckedChangeListener { _, checked ->
+            Prefs.setAutoReplyScreenOff(this, checked)
+            refreshAutoDesc()
+        }
+        swAutoVoice.setOnCheckedChangeListener { _, checked ->
+            Prefs.setAutoReplyVoice(this, checked)
+        }
+        swAutoLoc.setOnCheckedChangeListener { _, checked ->
+            Prefs.setAutoReplyLoc(this, checked)
+            if (checked) {
+                requestLocationIfNeeded()
+            }
+        }
+
+        btnNotifAccess.setOnClickListener {
+            safeStart(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+
+        refreshAutoDesc()
+    }
+
+    private fun requestLocationIfNeeded() {
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (fine == PackageManager.PERMISSION_GRANTED && coarse == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Доступ к геолокации есть ✔", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            requestPermissions(
+                arrayOf(
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ), 24
+            )
+        } else {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 24)
+        }
+    }
+
+    /** Что реально мешает/помогает автоответчику — карточка с честным статусом. */
+    private fun refreshAutoDesc() {
+        val base = getString(R.string.autoreply_desc)
+        val extra = StringBuilder()
+        if (!Prefs.autoReply(this)) {
+            extra.append("\n\nАвтоответчик выключен. Скажите «включи автоответ» или включите переключатель выше.")
+        } else {
+            if (!Llm.ready(this)) {
+                extra.append("\n\n⚠ ").append(getString(R.string.autoreply_no_model))
+            }
+            if (!AutoReplyService.isGranted(this)) {
+                extra.append("\n⚠ ").append(getString(R.string.autoreply_notif_access_bad))
+            }
+            if (Prefs.autoReplyLoc(this) &&
+                checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+            ) {
+                extra.append("\n⚠ Геолокация включена, но разрешение не выдано — «где ты» будет без адреса.")
+            }
+            extra.append("\n\nОтвечаю ")
+                .append(if (Prefs.autoReplyScreenOff(this)) "только при выключенном экране." else "и при включённом экране.")
+            if (!Prefs.autoReplyRules(this).isBlank()) {
+                extra.append("\nПравил: ").append(Prefs.autoReplyRules(this).lines().size)
+            }
+        }
+        tvAutoDesc.text = base.toString() + extra
+        tvNotifDesc.text = if (AutoReplyService.isGranted(this)) {
+            getString(R.string.autoreply_notif_access_ok)
+        } else {
+            getString(R.string.autoreply_notif_access_bad)
+        }
+    }
+
     // ------------------------------------------------------- провайдер ИИ
 
     private fun currentProvider(): Providers.Provider = activeProvider
@@ -324,6 +447,7 @@ class SettingsActivity : Activity() {
 
     override fun onPause() {
         saveFields()
+        Prefs.setAutoReplyRules(this, etAutoRules.text.toString())
         super.onPause()
     }
 
@@ -499,7 +623,13 @@ class SettingsActivity : Activity() {
             } else {
                 Toast.makeText(this, "Без микрофона голосовая активация невозможна", Toast.LENGTH_LONG).show()
             }
+            24 -> if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+                Toast.makeText(this, "Доступ к геолокации выдан ✔", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Геолокация не выдана — «где ты» будет без адреса", Toast.LENGTH_LONG).show()
+            }
         }
         refreshBgStatus()
+        refreshAutoDesc()
     }
 }
