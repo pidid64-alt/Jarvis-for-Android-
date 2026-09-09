@@ -11,6 +11,7 @@ import android.content.Intent
 object Notify {
 
     const val CH_REMINDERS = "jarvis_reminders"
+    const val CH_AUTO = "jarvis_auto"
     private const val ID_REMINDER_BASE = 4200
 
     fun createChannels(c: Context) {
@@ -32,6 +33,14 @@ object Notify {
         )
         rem.description = "Голосовые напоминания, поставленные командой «напомни …»"
         nm.createNotificationChannel(rem)
+
+        val auto = NotificationChannel(
+            CH_AUTO,
+            "Автоответчик",
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
+        auto.description = "Что Джарвис ответил в мессенджерах за вас"
+        nm.createNotificationChannel(auto)
     }
 
     fun reminder(c: Context, text: String) {
@@ -74,6 +83,93 @@ object Notify {
             .build()
         try {
             c.getSystemService(NotificationManager::class.java).notify(78, n)
+        } catch (e: Exception) { }
+    }
+
+    /** Автоответчик: Джарвис ответил в чате. */
+    fun autoReplySent(c: Context, appLabel: String, chatTitle: String, reply: String) {
+        val open = PendingIntent.getActivity(
+            c, 8,
+            Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n: Notification = Notification.Builder(c, CH_AUTO)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle("$appLabel · ответил $chatTitle")
+            .setContentText(reply)
+            .setStyle(Notification.BigTextStyle().bigText(
+                "Я ответил за вас в чате «$chatTitle»:\n$reply\n\n" +
+                    "Выключить автоответ: скажите «выключи автоответ» или в настройках."
+            ))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java)
+                .notify(ID_REMINDER_BASE + 100, n)
+        } catch (e: Exception) { }
+    }
+
+    /** Автоответчик: ответить не вышло (нет действия «Ответить» в уведомлении). */
+    fun autoReplyNoAction(c: Context, chatTitle: String) {
+        autoReplyNote(
+            c, "Не смог ответить «$chatTitle»",
+            "Мессенджер не прислал действие «Ответить» для этого сообщения — ответьте сами, сэр."
+        )
+    }
+
+    /** Автоответчик: модель недоступна (нет ключа ИИ). */
+    fun autoReplyNoModel(c: Context, chatTitle: String) {
+        autoReplyNote(
+            c, "Автоответ не сработал («$chatTitle»)",
+            "Для автоответов нужен настроенный провайдер ИИ: Настройки → Провайдер ИИ."
+        )
+    }
+
+    /** Автоответчик: ошибка сети/модели. */
+    fun autoReplyError(c: Context, chatTitle: String, msg: String?) {
+        autoReplyNote(
+            c, "Автоответ не удался («$chatTitle»)",
+            "Ошибка: ${msg?.take(120) ?: "неизвестно"}"
+        )
+    }
+
+    private fun autoReplyNote(c: Context, title: String, text: String) {
+        val open = PendingIntent.getActivity(
+            c, 9,
+            Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n: Notification = Notification.Builder(c, CH_AUTO)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(521, n)
+        } catch (e: Exception) { }
+    }
+
+    /** Подсказка, почему автоответчик пропустил сообщение (не чаще раза в день). */
+    fun autoReplyHint(c: Context, text: String) {
+        val open = PendingIntent.getActivity(
+            c, 10,
+            Intent(c, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n: Notification = Notification.Builder(c, CH_AUTO)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle("Джарвис · автоответчик")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text + "\n\nНажмите — откроются настройки."))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(522, n)
         } catch (e: Exception) { }
     }
 

@@ -53,9 +53,12 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   "$ROOT/app/src/kz/jarvis/app/Providers.kt" \
   "$ROOT/app/src/kz/jarvis/app/LlmRequests.kt" \
   "$ROOT/app/src/kz/jarvis/app/VoiceProfile.kt" \
-  "$ROOT/app/src/kz/jarvis/app/ResearchPlan.kt" \
-  "$ROOT/app/src/kz/jarvis/app/Deck.kt" \
-  "$ROOT/app/src/kz/jarvis/app/WebSearch.kt" \
+    "$ROOT/app/src/kz/jarvis/app/ResearchPlan.kt" \
+    "$ROOT/app/src/kz/jarvis/app/Deck.kt" \
+    "$ROOT/app/src/kz/jarvis/app/WebSearch.kt" \
+    "$ROOT/app/src/kz/jarvis/app/AssistantModes.kt" \
+    "$ROOT/app/src/kz/jarvis/app/AutoReplyLogic.kt" \
+    "$ROOT/app/src/kz/jarvis/app/ChatMedia.kt" \
   "$ROOT/tools/LogicTest.kt" 2>&1 | grep -v "^WARNING" | grep -v "jansi" | grep -v "native" || true
 
 if [ -z "$(find "$OUT/classes" -name '*.class')" ]; then

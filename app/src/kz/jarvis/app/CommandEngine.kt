@@ -16,6 +16,7 @@ import android.provider.AlarmClock
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.provider.Settings
+import android.telecom.TelecomManager
 import android.view.KeyEvent
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
@@ -52,7 +53,8 @@ object CommandEngine {
         val async: ((Context, (String) -> Unit) -> Unit)? = null,
         val sleepMinutes: Int = 0,
         val stopWake: Boolean = false,
-        val openApp: Boolean = false
+        val openApp: Boolean = false,
+        val endDialog: Boolean = false
     )
 
     private var torchOn = false
@@ -132,6 +134,7 @@ object CommandEngine {
         volume(ctx, s)?.let { return it }
         SystemCommands.media(ctx, s)?.let { return it }
         SystemCommands.screen(ctx, s)?.let { return it }
+        mediaApp(ctx, s)?.let { return it }
         music(ctx, s)?.let { return it }
         player(ctx, s)?.let { return it }
 
@@ -146,6 +149,7 @@ object CommandEngine {
         lists(ctx, s)?.let { return it }
 
         // ---------- связь ----------
+        waSend(ctx, s)?.let { return it }
         sms(ctx, s)?.let { return it }
         SystemCommands.share(ctx, s)?.let { return it }
         call(ctx, s)?.let { return it }
@@ -276,6 +280,8 @@ object CommandEngine {
             • «спроси у Клода как настроить роутер», «отправь это в Клод», «открой презентацию»
             • «голос Джарвиса», «голос брони», «женский голос», «говори ниже», «проверь голос»
             • «какой у тебя провайдер», «смени провайдера», «настройки Джарвиса»
+            • «включи непрерывный диалог» — говорить подряд, без повторного «Джарвис»
+            • «включи автоответ» — сам отвечу в WhatsApp/Telegram; «добавь правило: …»
             • «спи 10 минут», «стоп», «что ты умеешь»
             Подробности по темам: «команды конвертера», «команды телефона», «календарные команды»,
             «команды для текста», «команды-развлечения», «команды списков», «курсы валют»,
@@ -393,6 +399,9 @@ object CommandEngine {
 
     private fun serviceCmd(ctx: Context, s: String): Outcome? {
         noiseCmd(ctx, s)?.let { return it }
+        dialogCmd(ctx, s)?.let { return it }
+        autoReplyCmd(ctx, s)?.let { return it }
+        autoSendCmd(ctx, s)?.let { return it }
 
         Regex("(?:спи|спать|помолчи|отдохни|пауза|замолчи)\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?")
             .find(s)?.let { m ->
@@ -471,6 +480,172 @@ object CommandEngine {
         if (Regex("что такое|расскажи про|объясни|почему").containsMatchIn(s)) return null
 
         return Outcome("Скажите «включи шумоподавление» или «выключи шумоподавление», сэр.")
+    }
+
+    // --------------------------------------------------------- непрерывный диалог
+
+    /** «Включи/выключи непрерывный диалог», «непрерывный диалог включен?» */
+    private fun dialogCmd(ctx: Context, s: String): Outcome? {
+        if (!AssistantModes.isAboutDialog(s)) return null
+
+        AssistantModes.dialogRequest(s)?.let { want ->
+            Prefs.setFollowUp(ctx, want)
+            return Outcome(
+                if (want) {
+                    "Непрерывный диалог включён, сэр. После ответа я продолжаю слушать — " +
+                        "следующую фразу можно говорить без «Джарвис». " +
+                        "Вернусь к ожиданию слова после паузы в разговоре."
+                } else {
+                    "Непрерывный диалог выключен, сэр. Каждая команда теперь начинается со слова «Джарвис»."
+                }
+            )
+        }
+
+        if (Regex("включен|выключен|статус|состояние|работает|как сейчас|активен").containsMatchIn(s)) {
+            return Outcome(
+                if (Prefs.followUp(ctx)) {
+                    "Непрерывный диалог включён, сэр: после ответа скажите следующую фразу без «Джарвис»."
+                } else {
+                    "Непрерывный диалог выключен, сэр. Скажите «включи непрерывный диалог», чтобы говорить подряд."
+                }
+            )
+        }
+        // «что такое непрерывный диалог» — пусть отвечает ИИ
+        if (Regex("что такое|зачем|объясни|почему|расскажи про").containsMatchIn(s)) return null
+
+        return Outcome(
+            "Управление: «включи непрерывный диалог» или «выключи непрерывный диалог». " +
+                "В непрерывном диалоге после моего ответа можно сразу говорить следующее, без «Джарвис»."
+        )
+    }
+
+    // ---------------------------------------------------------- автоответчик
+
+    /** «Включи автоответ», «автоответчик работает?», «добавь правило автоответа …» */
+    private fun autoReplyCmd(ctx: Context, s: String): Outcome? {
+        if (!AssistantModes.isAboutAutoReply(s) && !AssistantModes.isRuleCommand(s)) return null
+        when (AssistantModes.autoReplyCommand(s)) {
+            AssistantModes.AutoReplyCommand.ON -> {
+                Prefs.setAutoReply(ctx, true)
+                return Outcome(autoReplyOnReply(ctx))
+            }
+            AssistantModes.AutoReplyCommand.OFF -> {
+                Prefs.setAutoReply(ctx, false)
+                return Outcome(
+                    "Автоответчик выключен, сэр. Входящие сообщения я больше не трогаю — " +
+                        "отвечайте сами."
+                )
+            }
+            AssistantModes.AutoReplyCommand.STATUS -> {
+                return Outcome(autoReplyStatusText(ctx))
+            }
+            AssistantModes.AutoReplyCommand.DIAG -> {
+                return Outcome(AutoReplyService.health(ctx))
+            }
+            AssistantModes.AutoReplyCommand.RULES_ADD -> {
+                val rule = AssistantModes.autoRuleText(s)
+                if (rule.isNullOrBlank()) {
+                    return Outcome(
+                        "Какую фразу запомнить, сэр? Скажите, например: «добавь правило: " +
+                            "если зовут гулять — отвечай, что я занят»."
+                    )
+                }
+                Prefs.addAutoReplyRule(ctx, rule)
+                return Outcome("Правило записано, сэр: «$rule».")
+            }
+            AssistantModes.AutoReplyCommand.RULES_SHOW -> {
+                val rules = Prefs.autoReplyRules(ctx)
+                return Outcome(
+                    if (rules.isBlank()) "Правил для автоответа пока нет, сэр."
+                    else "Правила автоответа, сэр: $rules"
+                )
+            }
+            AssistantModes.AutoReplyCommand.RULES_CLEAR -> {
+                Prefs.setAutoReplyRules(ctx, "")
+                return Outcome("Все правила автоответа удалены, сэр.")
+            }
+            null -> return null
+        }
+    }
+
+    private fun autoReplyOnReply(ctx: Context): String {
+        val extra = buildString {
+            if (!Llm.ready(ctx)) {
+                append(" Но для автоответов нужен настроенный провайдер ИИ — откройте «настройки Джарвиса» и впишите ключ.")
+            }
+            if (!AutoReplyService.isGranted(ctx)) {
+                append(" Дайте доступ к уведомлениям: «настройки Джарвиса» → «Автоответчик» → кнопка «Доступ к уведомлениям».")
+            }
+            if (!AutoReplyService.contactsGranted(ctx)) {
+                append(" Дайте доступ к контактам («настройки Джарвиса» → кнопка «Контакты») — иначе я не отличу своих от чужих.")
+            }
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                append(" Разрешите Джарвису «Уведомления» в системных настройках — иначе не покажу, что ответил.")
+            }
+            if (!Prefs.autoReplyScreenOff(ctx)) {
+                append(" Отвечаю даже при включённом экране.")
+            }
+        }
+        return "Автоответчик включён, сэр. В мессенджерах я сам отвечаю на сообщения личных контактов" +
+            (if (Prefs.autoReplyScreenOff(ctx)) " (когда экран выключен)" else "") +
+            ", пока не скажете «выключи автоответ»." + extra
+    }
+
+    private fun autoReplyStatusText(ctx: Context): String {
+        if (!Prefs.autoReply(ctx)) {
+            return "Автоответчик сейчас выключен, сэр. Скажите «включи автоответ» — и я буду " +
+                "отвечать за вас в WhatsApp и Telegram, когда экран выключен."
+        }
+        val problems = ArrayList<String>()
+        if (!Llm.ready(ctx)) problems.add("нет ключа ИИ — впишите в «настройках Джарвиса»")
+        if (!AutoReplyService.isGranted(ctx)) {
+            problems.add("не выдан «доступ к уведомлениям» — кнопка в настройках Джарвиса")
+        }
+        val rules = Prefs.autoReplyRules(ctx)
+        return buildString {
+            append("Автоответчик включён, сэр.")
+            if (Prefs.autoReplyScreenOff(ctx)) append(" Отвечаю, когда экран выключен.")
+            else append(" Отвечаю и при включённом экране.")
+            if (problems.isNotEmpty()) append(" Но: ").append(problems.joinToString("; ")).append(".")
+            if (rules.isNotBlank()) append(" Правила: ").append(rules).append(".")
+        }
+    }
+
+    /** «Включи автоотправку в вацап», «автоотправка работает?» — сервис спец. возможностей. */
+    private fun autoSendCmd(ctx: Context, s: String): Outcome? {
+        val about = Regex("автоотправк|сам(?:ая)? отправк|отправк[а-я]* (?:в|через|по) (?:вацап|whatsapp|ватсап|вотсап)|отправля(?:й|ть) само", RegexOption.IGNORE_CASE)
+        if (!about.containsMatchIn(s)) return null
+        val status = if (AutoSend.enabled(ctx)) "работает" else "выключена"
+        if (Regex("работает|включен|выключен|статус|проверь|проверить|как там").containsMatchIn(s)) {
+            return Outcome(
+                if (AutoSend.enabled(ctx)) "Автоотправка в WhatsApp включена, сэр: «напиши маме в вацап: привет» уйдёт само."
+                else "Автоотправка в WhatsApp выключена, сэр. Скажите «включи автоотправку» — и включите «Джарвис — автоотправку» в системном списке."
+            )
+        }
+        if (Regex("включ|вруб|настрой|как включить|хочу").containsMatchIn(s) &&
+            !Regex("выключ|отключ|не надо").containsMatchIn(s)
+        ) {
+            return if (AutoSend.enabled(ctx)) {
+                Outcome("Автоотправка в WhatsApp уже включена, сэр.")
+            } else {
+                Outcome(
+                    "Открываю список специальных возможностей. Включите там «Джарвис — автоотправка» — и сообщения по команде будут уходить сами.",
+                    AutoSend.openSettings(ctx)
+                )
+            }
+        }
+        if (Regex("выключ|отключ").containsMatchIn(s)) {
+            return if (!AutoSend.enabled(ctx)) {
+                Outcome("Автоотправка и так выключена, сэр.")
+            } else {
+                Outcome("Чтобы выключить автоотправку, выключите «Джарвис — автоотправку» в списке специальных возможностей (открываю).",
+                    AutoSend.openSettings(ctx))
+            }
+        }
+        return Outcome("Автоотправка в WhatsApp сейчас $status, сэр. «Включи автоотправку» — открою нужные настройки.")
     }
 
     // ------------------------------------------------------ напоминания
@@ -910,6 +1085,113 @@ object CommandEngine {
         return null
     }
 
+    /**
+     * «Включи песню X на ютубе», «включи X в спотифае», «включи ютуб»…
+     * YouTube: сразу запускаем первое найденное видео (поиск по названию).
+     * Spotify: открываем поиск в приложении (автозапуск трека требует API-ключа).
+     */
+    private fun mediaApp(ctx: Context, s: String): Outcome? {
+        val yt = ChatMedia.youtubeQuery(s)
+        if (yt != null) {
+            if (yt.isEmpty()) return openMediaApp(ctx, "youtube")
+            return Outcome(
+                "Секунду, ищу на YouTube: $yt.",
+                endDialog = true,
+                async = { c, cb ->
+                    var url: String? = null
+                    try {
+                        url = youtubeFirstResult(yt)
+                    } catch (e: Throwable) { url = null }
+                    launchView(
+                        c,
+                        url ?: "https://www.youtube.com/results?search_query=" + q(yt)
+                    )
+                    cb("Включаю «$yt» на YouTube.")
+                }
+            )
+        }
+        val sp = ChatMedia.spotifyQuery(s)
+        if (sp != null) {
+            if (sp.isEmpty()) return openMediaApp(ctx, "spotify")
+            val enc = q(sp)
+            val inApp = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:${Uri.encode(sp)}"))
+                .withTask(ctx)
+            return if (resolves(ctx, inApp)) {
+                Outcome("Открываю в Spotify поиск: «$sp».", inApp)
+            } else {
+                Outcome(
+                    "Spotify не установлен — открываю веб-версию.",
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://open.spotify.com/search/$enc"))
+                        .withTask(ctx)
+                )
+            }
+        }
+        return null
+    }
+
+    /** Открыть само приложение («включи ютуб» / «включи спотифай» без названия). */
+    private fun openMediaApp(ctx: Context, which: String): Outcome {
+        val pkg = when (which) {
+            "youtube" -> "com.google.android.youtube"
+            else -> "com.spotify.music"
+        }
+        val launch = try {
+            ctx.packageManager.getLaunchIntentForPackage(pkg)
+        } catch (e: Exception) {
+            null
+        }
+        val name = if (which == "youtube") "YouTube" else "Spotify"
+        return if (launch != null) {
+            Outcome("Открываю $name.", launch.withTask(ctx))
+        } else {
+            Outcome(
+                "$name не установлен. " +
+                    if (which == "youtube") "Открываю YouTube в браузере."
+                    else "Открываю Spotify в браузере.",
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse(if (which == "youtube") "https://www.youtube.com" else "https://open.spotify.com")
+                ).withTask(ctx)
+            )
+        }
+    }
+
+    /** Достаёт ссылку на первое найденное видео (без ключей API). */
+    private fun youtubeFirstResult(queryText: String): String? {
+        val url = java.net.URL("https://www.youtube.com/results?search_query=" + q(queryText))
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        try {
+            conn.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+            )
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val m = Regex("\"videoId\":\"([A-Za-z0-9_-]{11})\"").find(body) ?: return null
+            return "https://www.youtube.com/watch?v=${m.groupValues[1]}"
+        } finally {
+            try { conn.disconnect() } catch (e: Exception) { }
+        }
+    }
+
+    private fun resolves(ctx: Context, i: Intent): Boolean = try {
+        i.resolveActivity(ctx.packageManager) != null
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Открыть ссылку из фонового потока (всегда в новой задаче). */
+    private fun launchView(c: Context, url: String) {
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            c.applicationContext.startActivity(i)
+        } catch (e: Exception) {
+            // если нет ни приложения, ни браузера — молча
+        }
+    }
+
     // ------------------------------------------------- сеть и системные настройки
 
     private fun systemPanel(ctx: Context, s: String): Outcome? {
@@ -1213,8 +1495,40 @@ object CommandEngine {
         val direct = ctx is Activity ||
             ctx.checkSelfPermission(android.Manifest.permission.CALL_PHONE) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
-        return (if (direct) Intent(Intent.ACTION_CALL) else Intent(Intent.ACTION_DIAL))
+        val i = (if (direct) Intent(Intent.ACTION_CALL) else Intent(Intent.ACTION_DIAL))
             .setData(Uri.parse("tel:$num")).withTask(ctx)
+        if (direct && i.action == Intent.ACTION_CALL && Prefs.callSimFirst(ctx)) {
+            preferSimFirst(ctx, i)
+        }
+        return i
+    }
+
+    /**
+     * Двух SIM: добавляет в интент звонка «звонить первой SIM», чтобы система
+     * не спрашивала «какой картой звонить» каждый раз.
+     */
+    private fun preferSimFirst(ctx: Context, i: Intent) {
+        try {
+            val tm = ctx.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            val accounts = tm.callCapablePhoneAccounts
+            if (accounts.isNullOrEmpty()) return
+            i.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, accounts[0])
+            // подстраховка для прошивок, которые смотрят старые ключи слота
+            i.putExtra("com.android.phone.extra.slot", 0)
+            i.putExtra("com.android.phone.force.slot", true)
+        } catch (e: SecurityException) {
+            // список SIM без разрешения не отдать: просим его один раз
+            if (ctx is Activity &&
+                ctx.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                try {
+                    ctx.requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE), 43)
+                } catch (e2: Exception) { }
+            }
+        } catch (e: Exception) {
+            // нет телефонии/одна SIM — звонок пойдёт как обычно
+        }
     }
 
     private fun callContact(ctx: Context, name: String): Outcome {
@@ -1295,6 +1609,91 @@ object CommandEngine {
         return null
     }
 
+    // --------------------------------------------- отправка в WhatsApp голосом
+
+    /**
+     * «Напиши маме в вацап: я уже еду», «отправь в вацап папе что я занят»…
+     * Открывает чат WhatsApp с набранным текстом; если включена автоотправка
+     * (наш сервис спец. возможностей) — сообщение уходит само.
+     */
+    private fun waSend(ctx: Context, s: String): Outcome? {
+        if (!ChatMedia.isWaPhrase(s)) return null
+        val msg = ChatMedia.parseWa(s)
+        if (msg == null) {
+            return Outcome(
+                "Кому и что написать в WhatsApp, сэр? Например: «напиши маме в вацап: я уже еду»."
+            )
+        }
+        val name = msg.name
+        if (!hasContacts(ctx)) return contactsNeeded(ctx)
+        val raw = contactNumber(ctx, name)
+        if (raw == null) {
+            return Outcome(
+                "Контакт «$name» не найден, сэр. Скажите имя, как оно записано в телефонной книге."
+            )
+        }
+        val num = ChatMedia.phoneForWa(raw)
+        if (num == null) {
+            return Outcome("Не разобрал номер «$name» для WhatsApp, сэр (нужен номер с кодом страны).")
+        }
+        val text = msg.body
+        val pkg = installedWa(ctx)
+        val auto = pkg != null && AutoSend.enabled(ctx)
+
+        if (pkg != null) {
+            AutoSend.arm(pkg, text)
+            val chat = waChatIntent(num, text, pkg)
+            return if (auto) {
+                Outcome(
+                    "Открываю WhatsApp и отправляю «$text».",
+                    chat,
+                    endDialog = true,
+                    async = { _, cb ->
+                        val ok = AutoSend.waitResult()
+                        cb(
+                            if (ok) "Готово, сэр: сообщение «$text» ушло в WhatsApp."
+                            else "Не смог нажать «Отправить» сам — текст набран в чате, нажмите отправку, сэр."
+                        )
+                    }
+                )
+            } else {
+                Outcome(
+                    "Открываю чат «$name» в WhatsApp — текст набран. Нажмите «Отправить», сэр. " +
+                        "Чтобы сообщения уходили сами, скажите «включи автоотправку».",
+                    chat
+                )
+            }
+        }
+        // WhatsApp не установлен — веб-версия wa.me (откроется в браузере)
+        return Outcome(
+            "WhatsApp не установлен — открываю wa.me с готовым текстом, сэр.",
+            Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://wa.me/$num?text=${Uri.encode(text)}")
+            ).withTask(ctx)
+        )
+    }
+
+    /** Установлен ли WhatsApp (обычный или Business); null — нет. */
+    private fun installedWa(ctx: Context): String? =
+        ChatMedia.WA_PACKAGES.firstOrNull { (pkg, _) ->
+            try {
+                ctx.packageManager.getLaunchIntentForPackage(pkg) != null
+            } catch (e: Exception) {
+                false
+            }
+        }?.first
+
+    /** Интент «открыть чат WhatsApp с набранным текстом» (jid — прямой путь к чату). */
+    private fun waChatIntent(num: String, text: String, pkg: String): Intent =
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            setPackage(pkg)
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra("jid", "$num@s.whatsapp.net")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
     // -------------------------------------------------------------- карта
 
     private fun nav(ctx: Context, s: String): Outcome? {
@@ -1323,6 +1722,9 @@ object CommandEngine {
     private fun Intent.withTask(ctx: Context): Intent = apply {
         if (ctx !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+
+    /** URL-кодирование запроса. */
+    private fun q(text: String): String = URLEncoder.encode(text, "UTF-8")
 
     private fun audio(c: Context): AudioManager =
         c.getSystemService(Context.AUDIO_SERVICE) as AudioManager

@@ -53,6 +53,12 @@ class WakeWordService : Service() {
         private const val NOTIF_ID = 1
         private const val WATCHDOG_MS = 4_000L
 
+        /**
+         * Пауза в разговоре, после которой непрерывный диалог заканчивается
+         * и Джарвис снова ждёт слово «Джарвис».
+         */
+        private const val FOLLOW_IDLE_MS = 14_000L
+
         /** MainActivity на экране — служба в это время молчит, чтобы не мешать. */
         @Volatile
         var uiActive: Boolean = false
@@ -104,6 +110,12 @@ class WakeWordService : Service() {
 
     private enum class Mode { WAKE, COMMAND }
 
+    /** Фразы, после которых разговор завершается (ждём «Джарвис» снова). */
+    private val GOODBYE = Regex(
+        "^(пока|до свидания|прощай|отбой|до встречи|вс[её] пока|на сегодня вс[её]|" +
+            "заверши разговор|заканчиваем|хватит на сегодня|спасибо пока|пока джарвис)$"
+    )
+
     private val ui = Handler(Looper.getMainLooper())
     private var speech: SpeechRecognizer? = null
     private var tone: ToneGenerator? = null
@@ -120,6 +132,21 @@ class WakeWordService : Service() {
     private var lastCallback = System.currentTimeMillis()
     private var snoozeUntil = 0L
     private var errorStreak = 0
+
+    /**
+     * Непрерывный диалог: после ответа Джарвис продолжает слушать следующую
+     * реплику без нового «Джарвис» и закрывает сессию после тишины.
+     */
+    @Volatile private var followUp = false
+
+    /** В непрерывном диалоге сейчас пауза — ждём следующую реплику. */
+    @Volatile private var waitingFollowUp = false
+
+    /** До какого момента ждём следующую реплику (иначе сессия закрывается). */
+    private var followDeadline = 0L
+
+    /** После ответа сессию нужно закрыть (запуск окна/приложения, «пока»…). */
+    private var closeAfterReply = false
 
     /** Поколение перезапусков: новый restartListening отменяет старые отложенные. */
     private var listenGen = 0
@@ -158,8 +185,12 @@ class WakeWordService : Service() {
             }
             ACTION_UI_ACTIVE -> {
                 // окно приложения открылось — отдаём ему микрофон немедленно,
-                // иначе два распознавателя дерутся и микрофон «сбрасывается»
-                if (running && mode == Mode.WAKE) {
+                // иначе два распознавателя дерутся и микрофон «сбрасывается».
+                // Заодно закрываем непрерывный диалог: дальше говорит окно.
+                if (running) {
+                    followUp = false
+                    waitingFollowUp = false
+                    mode = Mode.WAKE
                     try { speech?.destroy() } catch (e: Exception) { }
                     speech = null
                     restartListening(3_000)
@@ -174,6 +205,9 @@ class WakeWordService : Service() {
             }
             running = true
             mode = Mode.WAKE
+            followUp = false
+            waitingFollowUp = false
+            closeAfterReply = false
             snoozeUntil = Prefs.snoozeUntil(this)
             AudioFx.sync(this)   // шумоподавление микрофона
             Voice.syncFx(this)   // эффект «брони» для голоса, если включён
@@ -347,7 +381,14 @@ class WakeWordService : Service() {
                     }
                     restartListening(delay)
                 }
-                mode == Mode.COMMAND && idle > 18_000 -> {
+                // непрерывный диалог: собеседник замолчал — сессия закрыта,
+                // снова ждём «Джарвис»
+                mode == Mode.COMMAND && followUp && waitingFollowUp &&
+                    !speaking && !working &&
+                    System.currentTimeMillis() > followDeadline -> {
+                    endFollowUpSession()
+                }
+                mode == Mode.COMMAND && !waitingFollowUp && idle > 18_000 -> {
                     say("Не расслышал, сэр.") { backToWake() }
                 }
             }
@@ -368,7 +409,16 @@ class WakeWordService : Service() {
 
     // ------------------------------------------------------------ пробуждение
 
-    private fun onWake(): Boolean {
+    /**
+     * Услышали «Джарвис». Если следом в той же фразе уже была команда
+     * ([tail]) — выполняем её сразу; иначе слушаем команду.
+     *
+     * Почему без «Слушаю, сэр.» в непрерывном диалоге: пока Джарвис говорит
+     * эту фразу, микрофон закрыт (иначе услышим собственный голос) — и команду
+     * приходится ждать 2–3 секунды. Теперь после сигнала микрофон свободен
+     * почти сразу, а сферу с текстом «Слушаю, сэр…» видно поверх экрана.
+     */
+    private fun onWake(tail: String? = null): Boolean {
         // Джарвис сам сейчас говорит (доклад о презентации, напоминание,
         // ответ из окна приложения) — микрофон поймал его собственный голос,
         // а не человека. Это не пробуждение.
@@ -386,13 +436,29 @@ class WakeWordService : Service() {
         }
 
         mode = Mode.COMMAND
+        followUp = Prefs.followUp(this)
+        waitingFollowUp = false
+        closeAfterReply = false
         notifyState("Слушаю команду…")
         overlay?.show("Слушаю, сэр…")
-        say("Слушаю, сэр.") {
-            ui.postDelayed({
-                mode = Mode.COMMAND
-                restartListening(0)
-            }, 150)
+
+        val phrase = tail?.trim().orEmpty()
+        if (phrase.isNotEmpty()) {
+            // «Джарвис, который час» — вся фраза уже в микрофоне, не переслушиваем
+            handleCommand(phrase)
+            return true
+        }
+        if (followUp) {
+            // непрерывный диалог: микрофон почти сразу, «Слушаю, сэр» не говорим
+            restartListening(120)
+        } else {
+            // старый режим: короткое подтверждение и слушаем
+            say("Слушаю, сэр.") {
+                ui.postDelayed({
+                    mode = Mode.COMMAND
+                    restartListening(0)
+                }, 150)
+            }
         }
         return true
     }
@@ -407,10 +473,41 @@ class WakeWordService : Service() {
     }
 
     private fun backToWake() {
+        followUp = false
+        waitingFollowUp = false
         mode = Mode.WAKE
         overlay?.autoHide(2_500)
         notifyState("Слушаю слово «Джарвис»…")
         restartListening(350)
+    }
+
+    /** Тихая концовка непрерывного диалога: собеседник замолчал. */
+    private fun endFollowUpSession() {
+        if (!running) return
+        followUp = false
+        waitingFollowUp = false
+        overlay?.update("Жду «Джарвис»…")
+        overlay?.autoHide(1_500)
+        notifyState("Слушаю слово «Джарвис»…")
+        mode = Mode.WAKE
+        restartListening(350)
+    }
+
+    /**
+     * Что делать после произнесённого ответа: в непрерывном диалоге — снова
+     * слушать следующую реплику (без «Джарвис»), иначе — вернуться к ожиданию
+     * слова.
+     */
+    private fun afterReply() {
+        if (!running) return
+        if (followUp && mode == Mode.COMMAND && !closeAfterReply && !snoozed()) {
+            waitingFollowUp = true
+            followDeadline = System.currentTimeMillis() + FOLLOW_IDLE_MS
+            overlay?.update("Слушаю, сэр… (можно без «Джарвис»)")
+            restartListening(500)
+            return
+        }
+        backToWake()
     }
 
     // ------------------------------------------------------------ выполнение команды
@@ -421,6 +518,24 @@ class WakeWordService : Service() {
             backToWake()
             return
         }
+        waitingFollowUp = false
+        closeAfterReply = false
+
+        val norm = CommandEngine.normalize(text)
+        // одно «Джарвис» посреди разговора — команды нет, просто слушаем дальше
+        if (norm.isEmpty()) {
+            if (followUp) {
+                waitingFollowUp = true
+                followDeadline = System.currentTimeMillis() + FOLLOW_IDLE_MS
+                restartListening(250)
+            } else {
+                backToWake()
+            }
+            return
+        }
+        // в непрерывном диалоге «пока» / «отбой» завершают разговор
+        if (followUp && GOODBYE.matches(norm)) closeAfterReply = true
+
         overlay?.update("«$text»")
         notifyState("Думаю…")
 
@@ -434,9 +549,23 @@ class WakeWordService : Service() {
             Conversation.add(text, true)
             Conversation.add(outcome.reply, false)
 
-            if (outcome.sleepMinutes > 0) snooze(outcome.sleepMinutes)
-            if (outcome.launch != null) launch(outcome.launch)
-            if (outcome.openApp) launchActivity(false)
+            // уходим в сон / открываем окно / чужое приложение —
+            // непрерывный диалог на этом заканчивается
+            if (outcome.sleepMinutes > 0) {
+                closeAfterReply = true
+                snooze(outcome.sleepMinutes)
+            }
+            if (outcome.launch != null) {
+                closeAfterReply = true
+                launch(outcome.launch)
+            }
+            if (outcome.openApp) {
+                closeAfterReply = true
+                launchActivity(false)
+            }
+            if (outcome.endDialog) {
+                closeAfterReply = true
+            }
 
             if (outcome.stopWake) {
                 Prefs.setWakeOn(this, false)
@@ -460,20 +589,24 @@ class WakeWordService : Service() {
                     }
                     ui.post {
                         working = false
-                        say(answer) { backToWake() }
+                        say(answer) { afterReply() }
                     }
                 }.start()
                 return
             }
-            say(if (outcome.silent) "" else outcome.reply) { backToWake() }
+            // «стоп»/«хватит» (silent) тоже продолжают слушать — собеседник
+            // прервал ответ и хочет сказать следующее
+            say(if (outcome.silent) "" else outcome.reply) { afterReply() }
             return
         }
 
         // не офлайн-команда — спрашиваем ИИ
         if (!Llm.ready(this)) {
+            // откроем окно с настройками ключа — диалог службы завершаем
+            closeAfterReply = true
             say("Такой команды офлайн у меня нет, сэр. " + Llm.missingKeyText(this)) {
                 launchActivity(false)
-                backToWake()
+                afterReply()
             }
             return
         }
@@ -483,7 +616,7 @@ class WakeWordService : Service() {
             ui.post {
                 working = false
                 Conversation.add(answer, false)
-                say(answer) { backToWake() }
+                say(answer) { afterReply() }
             }
         }
     }
@@ -586,18 +719,12 @@ class WakeWordService : Service() {
                 if (!t.isNullOrBlank()) overlay?.update("«$t»")
                 return
             }
-            // во время любой озвучки всё услышанное — эхо собственного голоса:
-            // wake-слово «Джарвис» в докладе (например, в пути к файлу
-            // «Загрузки/Jarvis/…») не должно будить службу посреди фразы
-            if (SpeechState.speaking()) return
-            val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
-            for (t in texts) {
-                if (t != null && WakeWords.contains(t)) {
-                    try { speech?.stopListening() } catch (e: Exception) { }
-                    onWake()
-                    return
-                }
-            }
+            // В режиме ожидания слова НЕ рвём распознавание на середине фразы.
+            // Раньше «Джарвис» в частичном результате мгновенно гасил микрофон
+            // и перезапускал распознаватель — команда «Джарвис, который час»,
+            // сказанная одним выдохом, терялась, а пауза до следующего приёма
+            // речи ощущалась как «микрофон отключается на пару секунд».
+            // Теперь даём фразе договорить и разбираем её целиком в onResults.
         }
 
         override fun onResults(results: Bundle?) {
@@ -606,15 +733,28 @@ class WakeWordService : Service() {
             silentDrops = 0
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (mode == Mode.WAKE) {
-                var hit = false
-                if (!SpeechState.speaking()) {
-                    if (texts != null) for (t in texts) if (t != null && WakeWords.contains(t)) hit = true
+                var hitText: String? = null
+                if (!SpeechState.speaking() && texts != null) {
+                    for (t in texts) {
+                        if (t != null && WakeWords.contains(t)) { hitText = t; break }
+                    }
                 }
-                if (hit) onWake() else restartListening(150)
+                if (hitText != null) {
+                    // «Джарвис, который час» одной фразой — берём команду из хвоста
+                    val tail = WakeWords.removeFromText(hitText)
+                    onWake(tail.ifBlank { null })
+                } else {
+                    restartListening(150)
+                }
             } else {
                 val text = texts?.firstOrNull { !it.isNullOrBlank() }
                 if (text.isNullOrBlank()) {
-                    say("Не расслышал, сэр.") { backToWake() }
+                    if (waitingFollowUp) {
+                        // непрерывный диалог: тишина — просто слушаем дальше
+                        restartListening(300)
+                    } else {
+                        say("Не расслышал, сэр.") { backToWake() }
+                    }
                 } else {
                     try { speech?.stopListening() } catch (e: Exception) { }
                     handleCommand(text)
@@ -627,7 +767,13 @@ class WakeWordService : Service() {
             if (mode == Mode.COMMAND &&
                 (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
             ) {
-                say("Не расслышал, сэр.") { backToWake() }
+                if (waitingFollowUp) {
+                    // пауза в непрерывном диалоге: не нудим «не расслышал»,
+                    // а тихо ждём следующую реплику (сессию закроет watchdog)
+                    restartListening(250)
+                } else {
+                    say("Не расслышал, сэр.") { backToWake() }
+                }
                 return
             }
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
@@ -656,7 +802,11 @@ class WakeWordService : Service() {
                 errorStreak > 6 -> { errorStreak = 0; 15_000L }
                 else -> 500L
             }
-            if (mode == Mode.COMMAND && errorStreak > 2) backToWake() else restartListening(delay)
+            if (mode == Mode.COMMAND && errorStreak > 2 && !waitingFollowUp) {
+                backToWake()
+            } else {
+                restartListening(delay)
+            }
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) {}

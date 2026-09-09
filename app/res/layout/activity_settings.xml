@@ -271,6 +271,42 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- Непрерывный диалог -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dialog_on"
+                    android:textColor="@color/text_main"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="@string/dialog_desc"
+                    android:textColor="@color/text_dim"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <Switch
+                android:id="@+id/swDialog"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
         <!-- Голос Джарвиса -->
         <TextView
             android:layout_width="wrap_content"
@@ -455,6 +491,313 @@
             android:backgroundTint="@color/cyan"
             android:paddingStart="22dp"
             android:paddingEnd="22dp" />
+
+        <!-- Автоответчик в мессенджерах -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="@string/autoreply_title"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvAutoDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="10dp"
+            android:text="@string/autoreply_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/autoreply_master"
+                android:textColor="@color/text_main"
+                android:textSize="15sp" />
+
+            <Switch
+                android:id="@+id/swAuto"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnNotifAccess"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/panel_light"
+            android:text="@string/autoreply_notif_access"
+            android:textColor="@color/cyan" />
+
+        <TextView
+            android:id="@+id/tvNotifDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnAutoDiag"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/panel_light"
+            android:text="@string/autoreply_diag_button"
+            android:textColor="@color/cyan" />
+
+        <Button
+            android:id="@+id/btnAutoLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/panel_light"
+            android:text="@string/autoreply_log_button"
+            android:textColor="@color/cyan" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/autoreply_screen_off"
+                    android:textColor="@color/text_main"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="@string/autoreply_screen_off_desc"
+                    android:textColor="@color/text_dim"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <Switch
+                android:id="@+id/swAutoScreen"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/autoreply_loc"
+                    android:textColor="@color/text_main"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="@string/autoreply_loc_desc"
+                    android:textColor="@color/text_dim"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <Switch
+                android:id="@+id/swAutoLoc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/autoreply_voice"
+                    android:textColor="@color/text_main"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="@string/autoreply_voice_desc"
+                    android:textColor="@color/text_dim"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <Switch
+                android:id="@+id/swAutoVoice"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/autoreply_rules_title"
+            android:textColor="@color/cyan"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/etAutoRules"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:gravity="top"
+            android:hint="@string/autoreply_rules_hint"
+            android:inputType="textMultiLine"
+            android:minLines="3"
+            android:padding="12dp"
+            android:textColor="@color/text_main"
+            android:textColorHint="@color/text_dim"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/autoreply_rules_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <!-- Музыка и видео (голосом) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="@string/media_title"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="10dp"
+            android:text="@string/media_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <!-- Отправка в WhatsApp голосом -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="@string/auto_send_title"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="10dp"
+            android:text="@string/auto_send_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnAutoSend"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/panel_light"
+            android:text="@string/auto_send_button"
+            android:textColor="@color/cyan" />
+
+        <TextView
+            android:id="@+id/tvAutoSendStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <!-- Звонки: всегда первая SIM -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/call_sim_title"
+                    android:textColor="@color/text_main"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="@string/call_sim_desc"
+                    android:textColor="@color/text_dim"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <Switch
+                android:id="@+id/swCallSim"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
 
         <!-- Фоновый режим -->
         <TextView
