@@ -153,6 +153,26 @@ object Notify {
         } catch (e: Exception) { }
     }
 
+    /** Подсказка, почему автоответчик пропустил сообщение (не чаще раза в день). */
+    fun autoReplyHint(c: Context, text: String) {
+        val open = PendingIntent.getActivity(
+            c, 10,
+            Intent(c, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n: Notification = Notification.Builder(c, CH_AUTO)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle("Джарвис · автоответчик")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text + "\n\nНажмите — откроются настройки."))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(522, n)
+        } catch (e: Exception) { }
+    }
+
     /** Подсказка после перезагрузки: микрофон-службу нельзя поднять из фона. */
     fun needRestart(c: Context) {
         val open = PendingIntent.getActivity(

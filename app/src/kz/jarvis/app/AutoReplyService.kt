@@ -63,6 +63,80 @@ class AutoReplyService : NotificationListenerService() {
         } catch (e: Exception) {
             false
         }
+
+        /** Есть ли у самого Джарвиса право показывать свои уведомления. */
+        private fun ownNotifsAllowed(c: Context): Boolean =
+            Build.VERSION.SDK_INT < 33 || c.checkSelfPermission(
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+        /** Выдан ли доступ к телефонной книге (по ней отличаем своих от чужих). */
+        fun contactsGranted(c: Context): Boolean = try {
+            c.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
+                PackageManager.PERMISSION_GRANTED
+        } catch (e: Exception) {
+            false
+        }
+
+        /**
+         * Честная карточка «почему автоответчик не работает / что готово».
+         * Первые строки — жёсткие блокеры, дальше — предупреждения. Возвращает
+         * текст с переносами строк; используется голосовой командой «проверь
+         * автоответчик» и кнопкой в настройках.
+         */
+        fun health(c: Context): String = buildString {
+            if (!Prefs.autoReply(c)) {
+                append("Автоответчик выключен, сэр. Включите его: «включи автоответ» или переключатель в настройках.")
+                return@buildString
+            }
+            append("Автоответчик включён.\n")
+            fun mark(ok: Boolean, okText: String, badText: String) {
+                if (ok) append("✔ ").append(okText).append("\n")
+                else append("✖ ").append(badText).append("\n")
+            }
+            mark(
+                isGranted(c),
+                "Доступ к уведомлениям выдан.",
+                "Нет «Доступа к уведомлениям» — система не передаёт Джарвису сообщения вообще. " +
+                    "Настройки Джарвиса → Автоответчик → кнопка «Доступ к уведомлениям» и включите «Джарвис — автоответчик» в системном списке."
+            )
+            mark(
+                Llm.ready(c),
+                "Провайдер ИИ настроен.",
+                "Нет настроенного провайдера ИИ (ключа) — некому придумывать ответы. Настройки Джарвиса → Провайдер ИИ."
+            )
+            mark(
+                contactsGranted(c),
+                "Доступ к контактам есть.",
+                "Нет доступа к контактам: Джарвис не отличает своих от чужих и пропускает чаты, " +
+                    "названные именами (отвечает только чатам-номерам). Дайте доступ в настройках Джарвиса."
+            )
+            mark(
+                ownNotifsAllowed(c),
+                "Уведомления Джарвиса видны.",
+                "Джарвису запрещены свои уведомления — вы не увидите, что он ответил или почему не ответил. " +
+                    "Дайте «Уведомления» в системных настройках приложения."
+            )
+            if (Prefs.autoReplyScreenOff(c)) {
+                append("Экран: отвечаю только когда он погашен — при включённом экране сообщения пропускаю (вы же читаете чат сами).\n")
+            } else {
+                append("Экран: отвечаю и при включённом экране.\n")
+            }
+            val geoOk = c.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+            if (Prefs.autoReplyLoc(c) && !geoOk) {
+                append("⚠ Геолокация включена, но разрешения нет — на «где ты» отвечу без адреса.\n")
+            }
+            append("Проверка: погасите экран и попросите кого-нибудь написать вам (или напишите со второго номера) — " +
+                "в чате появится ответ, а Джарвис пришлёт уведомление «ответил…».")
+        }
+
+        /** Одна подсказка-предупреждение в день (не чаще). */
+        fun hintOnce(c: Context, text: String) {
+            if (Prefs.autoHintPosted(c)) return
+            Prefs.markAutoHintPosted(c)
+            Notify.autoReplyHint(c, text)
+        }
     }
 
     private class Chat(val key: String, val title: String, val appLabel: String) {
@@ -111,13 +185,31 @@ class AutoReplyService : NotificationListenerService() {
         }
         if (title.isEmpty() || text.isEmpty()) return
         if (AutoReplyLogic.shouldSkip(title, text)) return
-        if (!AutoReplyLogic.isKnownPerson(title, contactNames())) {
-            // группа, рассылка или незнакомый чат — автоответа нет
+        if (!AutoReplyLogic.isKnownPerson(title, if (contactsGranted(this)) contactNames() else emptyList())) {
+            // группа, рассылка или незнакомый чат — автоответа нет.
+            // Но если нет доступа к контактам, Джарвис не может отличить
+            // «своего» от чужого вообще — подскажем, что нужно выдать доступ.
+            if (!contactsGranted(this)) {
+                hintOnce(
+                    this,
+                    "Пропустил сообщение из «$title»: нет доступа к контактам, и я не могу понять, свой это или чужой. " +
+                        "Дайте доступ: Настройки Джарвиса → кнопка «Контакты»."
+                )
+            }
             return
         }
 
         // владелец сейчас смотрит в экран — он сам ответит (настройка)
-        if (Prefs.autoReplyScreenOff(this) && screenOn()) return
+        if (Prefs.autoReplyScreenOff(this) && screenOn()) {
+            // режим «только при выключенном экране»: пропускаем молча, но раз в день
+            // напомним, почему ничего не происходит (иначе выглядит как поломка)
+            hintOnce(
+                this,
+                "Сообщение из «$title» пропустил: включён режим «отвечать, только когда экран выключен», а экран сейчас горит. " +
+                    "Погасите экран и попросите написать снова — или выключите эту опцию в Настройках Джарвиса → Автоответчик."
+            )
+            return
+        }
 
         val now = System.currentTimeMillis()
         if (now - sbn.postTime > 60_000) return   // очень старое уведомление

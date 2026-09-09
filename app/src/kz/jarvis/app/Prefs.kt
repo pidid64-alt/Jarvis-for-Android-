@@ -22,6 +22,7 @@ object Prefs {
     private const val K_AUTO_LOC = "auto_reply_location"
     private const val K_AUTO_VOICE = "auto_reply_voice"
     private const val K_AUTO_RULES = "auto_reply_rules"
+    private const val K_AUTO_HINT_DAY = "auto_reply_hint_day"
 
     // голос
     private const val K_VOICE = "voice_profile"
@@ -143,6 +144,20 @@ object Prefs {
         val all = (autoReplyRules(c) + "\n" + r).lines().filter { it.isNotBlank() }
             .distinct().joinToString("\n")
         setAutoReplyRules(c, all)
+    }
+
+    /**
+     * Подсказки автоответчика («почему пропустил») показываем не чаще раза
+     * в день — иначе каждое сообщение дёргало бы владельца.
+     */
+    fun autoHintPosted(c: Context): Boolean {
+        val day = System.currentTimeMillis() / 86_400_000L
+        return sp(c).getLong(K_AUTO_HINT_DAY, 0L) == day
+    }
+
+    fun markAutoHintPosted(c: Context) {
+        val day = System.currentTimeMillis() / 86_400_000L
+        sp(c).edit().putLong(K_AUTO_HINT_DAY, day).apply()
     }
 
     // ------------------------------------------------------------------ голос

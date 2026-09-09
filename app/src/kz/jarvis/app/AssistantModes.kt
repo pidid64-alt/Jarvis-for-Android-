@@ -33,7 +33,7 @@ object AssistantModes {
         return Regex("после ответа|один раз").containsMatchIn(s) && Regex("джарвис").containsMatchIn(s)
     }
 
-    enum class AutoReplyCommand { ON, OFF, STATUS, RULES_ADD, RULES_SHOW, RULES_CLEAR }
+    enum class AutoReplyCommand { ON, OFF, STATUS, DIAG, RULES_ADD, RULES_SHOW, RULES_CLEAR }
 
     /** Что хочет пользователь про автоответчик; null — фраза не про него. */
     fun autoReplyCommand(s: String): AutoReplyCommand? {
@@ -52,6 +52,14 @@ object AssistantModes {
         }
 
         if (!isAboutAutoReply(s)) return null
+
+        // просьба проверить / жалоба, что не работает — полная диагностика
+        if (Regex("(?:проверь|диагностик|почему|что мешает|разберись)|не работает|не отвечает|не сработал|не срабатыва")
+                .containsMatchIn(s) &&
+            Regex("(?:автоответ|мессенджер|вацап|ватсап|телеграм|вотсап|проверь)").containsMatchIn(s)
+        ) {
+            return AutoReplyCommand.DIAG
+        }
 
         // вопрос о состоянии / «что такое»
         if (Regex("включен|выключен|статус|работает|состояние|как сейчас|активен|что такое|что это|зачем|расскажи|объясни|настроен")

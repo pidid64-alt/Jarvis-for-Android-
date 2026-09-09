@@ -496,6 +496,16 @@ fun main() {
         AssistantModes.autoReplyCommand("какая погода"))
     check("не про автоответ (правила без слова)", null,
         AssistantModes.autoReplyCommand("покажи правила"))
+    check("проверь автоответчик — диагностика", AssistantModes.AutoReplyCommand.DIAG,
+        AssistantModes.autoReplyCommand("проверь автоответчик"))
+    check("почему не работает — диагностика", AssistantModes.AutoReplyCommand.DIAG,
+        AssistantModes.autoReplyCommand("почему не работает автоответчик"))
+    check("жалоба, что молчит — диагностика", AssistantModes.AutoReplyCommand.DIAG,
+        AssistantModes.autoReplyCommand("автоответчик не срабатывает"))
+    check("проверь мессенджеры — диагностика", AssistantModes.AutoReplyCommand.DIAG,
+        AssistantModes.autoReplyCommand("проверь, почему автоответ не отвечает в вацапе"))
+    check("статус «работает?» — не диагностика", AssistantModes.AutoReplyCommand.STATUS,
+        AssistantModes.autoReplyCommand("автоответчик работает?"))
 
     println("== Автоответчик: правила и мессенджеры ==")
     check("правило после двоеточия", "если зовут гулять — отвечай, что я занят",

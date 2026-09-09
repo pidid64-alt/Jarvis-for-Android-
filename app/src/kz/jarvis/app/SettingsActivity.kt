@@ -53,6 +53,7 @@ class SettingsActivity : Activity() {
     private lateinit var tvAutoDesc: TextView
     private lateinit var btnNotifAccess: Button
     private lateinit var tvNotifDesc: TextView
+    private lateinit var btnAutoDiag: Button
     private lateinit var swAutoScreen: Switch
     private lateinit var swAutoLoc: Switch
     private lateinit var swAutoVoice: Switch
@@ -98,6 +99,7 @@ class SettingsActivity : Activity() {
         tvAutoDesc = findViewById(R.id.tvAutoDesc)
         btnNotifAccess = findViewById(R.id.btnNotifAccess)
         tvNotifDesc = findViewById(R.id.tvNotifDesc)
+        btnAutoDiag = findViewById(R.id.btnAutoDiag)
         swAutoScreen = findViewById(R.id.swAutoScreen)
         swAutoLoc = findViewById(R.id.swAutoLoc)
         swAutoVoice = findViewById(R.id.swAutoVoice)
@@ -330,10 +332,24 @@ class SettingsActivity : Activity() {
         swAuto.setOnCheckedChangeListener { _, checked ->
             Prefs.setAutoReply(this, checked)
             refreshAutoDesc()
-            if (checked && !AutoReplyService.isGranted(this)) {
+            if (!checked) return@setOnCheckedChangeListener
+            // Джарвису самому нужно право показывать уведомления — иначе не видно,
+            // что он ответил или почему не ответил (Android 13+)
+            if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 25)
+            }
+            if (!AutoReplyService.isGranted(this)) {
                 Toast.makeText(
                     this,
-                    "Теперь выдайте «Доступ к уведомлениям» (кнопка ниже), сэр",
+                    "Включил. Теперь в системном списке включите «Джарвис — автоответчик» (кнопка «Доступ к уведомлениям» ниже)",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else if (!AutoReplyService.contactsGranted(this)) {
+                Toast.makeText(
+                    this,
+                    "Включил. Дайте ещё доступ к контактам (кнопка «Контакты» ниже) — иначе я не отличу своих от чужих",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -354,6 +370,13 @@ class SettingsActivity : Activity() {
 
         btnNotifAccess.setOnClickListener {
             safeStart(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+
+        // Полная проверка: показывает ровно то, чего не хватает автоответчику.
+        btnAutoDiag.setOnClickListener {
+            val health = AutoReplyService.health(this)
+            tvAutoDesc.text = getString(R.string.autoreply_desc) + "\n\n" + health
+            Toast.makeText(this, health.replace("\n", " ").take(220), Toast.LENGTH_LONG).show()
         }
 
         refreshAutoDesc()
@@ -385,22 +408,47 @@ class SettingsActivity : Activity() {
         if (!Prefs.autoReply(this)) {
             extra.append("\n\nАвтоответчик выключен. Скажите «включи автоответ» или включите переключатель выше.")
         } else {
-            if (!Llm.ready(this)) {
-                extra.append("\n\n⚠ ").append(getString(R.string.autoreply_no_model))
+            fun line(ok: Boolean, okText: String, badText: String) {
+                extra.append("\n").append(if (ok) "✔ " else "✖ ").append(if (ok) okText else badText)
             }
-            if (!AutoReplyService.isGranted(this)) {
-                extra.append("\n⚠ ").append(getString(R.string.autoreply_notif_access_bad))
-            }
+            line(
+                Llm.ready(this),
+                "провайдер ИИ настроен",
+                "нет ключа ИИ — ответы некому сочинять (Настройки → Провайдер ИИ)"
+            )
+            line(
+                AutoReplyService.isGranted(this),
+                "доступ к уведомлениям выдан",
+                "нет «доступа к уведомлениям» — включите «Джарвис — автоответчик» в системном списке"
+            )
+            line(
+                AutoReplyService.contactsGranted(this),
+                "доступ к контактам есть",
+                "нет доступа к контактам — не отличаю своих от чужих (кнопка «Контакты» ниже)"
+            )
+            line(
+                Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED,
+                "свои уведомления вижу",
+                "мои уведомления запрещены — не покажу, что ответил или почему не ответил"
+            )
+            extra.append("\nОтвечаю ")
+                .append(
+                    if (Prefs.autoReplyScreenOff(this)) {
+                        "только при выключенном экране (проверка: погасите экран)."
+                    } else {
+                        "и при включённом экране."
+                    }
+                )
             if (Prefs.autoReplyLoc(this) &&
                 checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
             ) {
                 extra.append("\n⚠ Геолокация включена, но разрешение не выдано — «где ты» будет без адреса.")
             }
-            extra.append("\n\nОтвечаю ")
-                .append(if (Prefs.autoReplyScreenOff(this)) "только при выключенном экране." else "и при включённом экране.")
             if (!Prefs.autoReplyRules(this).isBlank()) {
                 extra.append("\nПравил: ").append(Prefs.autoReplyRules(this).lines().size)
             }
+            extra.append("\n\nНе отвечает? Нажмите «Проверить, почему не отвечает» — скажу точно.")
         }
         tvAutoDesc.text = base.toString() + extra
         tvNotifDesc.text = if (AutoReplyService.isGranted(this)) {
@@ -627,6 +675,15 @@ class SettingsActivity : Activity() {
                 Toast.makeText(this, "Доступ к геолокации выдан ✔", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "Геолокация не выдана — «где ты» будет без адреса", Toast.LENGTH_LONG).show()
+            }
+            25 -> if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Уведомления Джарвиса теперь видны ✔", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Без разрешения на уведомления вы не увидите, что я ответил или почему не ответил",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
         refreshBgStatus()

@@ -534,6 +534,9 @@ object CommandEngine {
             AssistantModes.AutoReplyCommand.STATUS -> {
                 return Outcome(autoReplyStatusText(ctx))
             }
+            AssistantModes.AutoReplyCommand.DIAG -> {
+                return Outcome(AutoReplyService.health(ctx))
+            }
             AssistantModes.AutoReplyCommand.RULES_ADD -> {
                 val rule = AssistantModes.autoRuleText(s)
                 if (rule.isNullOrBlank()) {
@@ -566,7 +569,16 @@ object CommandEngine {
                 append(" Но для автоответов нужен настроенный провайдер ИИ — откройте «настройки Джарвиса» и впишите ключ.")
             }
             if (!AutoReplyService.isGranted(ctx)) {
-                append(" Дайте доступ к уведомлениям: «настройки Джарвиса» → «Автоответчик».")
+                append(" Дайте доступ к уведомлениям: «настройки Джарвиса» → «Автоответчик» → кнопка «Доступ к уведомлениям».")
+            }
+            if (!AutoReplyService.contactsGranted(ctx)) {
+                append(" Дайте доступ к контактам («настройки Джарвиса» → кнопка «Контакты») — иначе я не отличу своих от чужих.")
+            }
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                append(" Разрешите Джарвису «Уведомления» в системных настройках — иначе не покажу, что ответил.")
             }
             if (!Prefs.autoReplyScreenOff(ctx)) {
                 append(" Отвечаю даже при включённом экране.")

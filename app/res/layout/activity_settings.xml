@@ -551,6 +551,15 @@
             android:textColor="@color/text_dim"
             android:textSize="11sp" />
 
+        <Button
+            android:id="@+id/btnAutoDiag"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/panel_light"
+            android:text="@string/autoreply_diag_button"
+            android:textColor="@color/cyan" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
