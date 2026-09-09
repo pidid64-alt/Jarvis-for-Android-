@@ -54,6 +54,7 @@ class SettingsActivity : Activity() {
     private lateinit var btnNotifAccess: Button
     private lateinit var tvNotifDesc: TextView
     private lateinit var btnAutoDiag: Button
+    private lateinit var btnAutoLog: Button
     private lateinit var swAutoScreen: Switch
     private lateinit var swAutoLoc: Switch
     private lateinit var swAutoVoice: Switch
@@ -100,6 +101,7 @@ class SettingsActivity : Activity() {
         btnNotifAccess = findViewById(R.id.btnNotifAccess)
         tvNotifDesc = findViewById(R.id.tvNotifDesc)
         btnAutoDiag = findViewById(R.id.btnAutoDiag)
+        btnAutoLog = findViewById(R.id.btnAutoLog)
         swAutoScreen = findViewById(R.id.swAutoScreen)
         swAutoLoc = findViewById(R.id.swAutoLoc)
         swAutoVoice = findViewById(R.id.swAutoVoice)
@@ -379,7 +381,36 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, health.replace("\n", " ").take(220), Toast.LENGTH_LONG).show()
         }
 
+        // Журнал: что служба видела и что делала (подключение, сообщения, вердикты).
+        // Это превращает «не работает» в конкретную строчку.
+        btnAutoLog.setOnClickListener { showAutoLog() }
+
         refreshAutoDesc()
+    }
+
+    /** Показывает последние строки журнала автоответчика в окне. */
+    private fun showAutoLog() {
+        AutoLog.attach(this)
+        val body = AutoLog.tail(150)
+        val pad = (14 * resources.displayMetrics.density).toInt()
+        val tv = TextView(this).apply {
+            text = "Каждый шаг службы: подключение, пришедшие сообщения, " +
+                "почему пропущены, что ответил. Откройте ПОСЛЕ того, как кто-нибудь " +
+                "напишет вам в мессенджер.\n\n" + body
+            textSize = 12f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(0xFFDFDFDF.toInt())
+            setPadding(pad, pad, pad, pad)
+        }
+        val sv = android.widget.ScrollView(this).apply {
+            addView(tv)
+            setPadding(pad, pad / 3, pad, pad / 3)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.autoreply_log_button)
+            .setView(sv)
+            .setPositiveButton("Закрыть", null)
+            .show()
     }
 
     private fun requestLocationIfNeeded() {

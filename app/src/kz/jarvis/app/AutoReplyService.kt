@@ -45,6 +45,8 @@ class AutoReplyService : NotificationListenerService() {
     companion object {
         private const val MAX_CHATS = 24
         private const val MIN_REPLY_INTERVAL_MS = 15_000   // один чат не чаще раза в 15 сек
+        /** Ключ в extras, под которым MessagingStyle хранит сообщения (см. AOSP). */
+        private const val EXTRA_MESSAGES = "android.messages"
         private const val AUTO_SYSTEM =
             "Ты — Джарвис, личный ассистент владельца телефона. " +
                 "Ты составляешь ответы в мессенджерах от его имени. " +
@@ -155,6 +157,19 @@ class AutoReplyService : NotificationListenerService() {
 
     // --------------------------------------------------------- вход из системы
 
+    /** Система подключила слушателя — значит, «Доступ к уведомлениям» реально выдан. */
+    override fun onListenerConnected() {
+        AutoLog.add(this, "✔ Служба подключена системой — уведомления мессенджеров будут приходить сюда.")
+        super.onListenerConnected()
+    }
+
+    /** Пользователь (или система) отключил доступ к уведомлениям. */
+    override fun onListenerDisconnected() {
+        AutoLog.add(this, "✖ Система отключила слушателя. " +
+            "Проверьте «Доступ к уведомлениям» в системных настройках.")
+        super.onListenerDisconnected()
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
         try {
@@ -165,30 +180,45 @@ class AutoReplyService : NotificationListenerService() {
     }
 
     private fun onIncoming(sbn: StatusBarNotification) {
-        if (!Prefs.autoReply(this)) return
+        // смотрим только уведомления известных мессенджеров
         val appLabel = AutoReplyLogic.messengerLabel(sbn.packageName) ?: return
         val n = sbn.notification ?: return
         if (sbn.isOngoing) return
-
         val extras = n.extras ?: return
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)
-            ?.toString()?.trim().orEmpty()
-        var text = extras.getCharSequence(Notification.EXTRA_TEXT)
-            ?.toString()?.trim().orEmpty()
-        if (text.isEmpty()) {
-            val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-            text = lines?.joinToString("\n") { it.toString().trim() }?.trim().orEmpty()
+
+        // вытаскиваем «кто» и «что написал» — пробуем все форматы, которые
+        // используют мессенджеры (обычный текст, BigText, MessagingStyle, строки)
+        val title = extractTitle(n)
+        val text = extractText(n)
+        if (title.isEmpty() || text.isEmpty()) {
+            AutoLog.add(
+                this,
+                "Пропустил уведомление $appLabel: не удалось прочитать отправителя или текст " +
+                    "(title=${title.take(40)}, text=${text.take(40)})"
+            )
+            return
         }
-        if (text.isEmpty()) {
-            text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-                ?.toString()?.trim().orEmpty()
+        val actionsCount = n.actions?.size ?: 0
+
+        if (!Prefs.autoReply(this)) {
+            AutoLog.add(
+                this,
+                "Пропустил «$title» ($appLabel): автоответчик выключен. Скажите «включи автоответ»."
+            )
+            return
         }
-        if (title.isEmpty() || text.isEmpty()) return
-        if (AutoReplyLogic.shouldSkip(title, text)) return
+
+        AutoLog.add(this, "Пришло сообщение от «$title» ($appLabel): «${text.take(90)}» (действий: $actionsCount)")
+
+        if (AutoReplyLogic.shouldSkip(title, text)) {
+            AutoLog.add(this, "Пропустил «$title»: служебное сообщение (шифрование/звонок/прочее).")
+            return
+        }
         if (!AutoReplyLogic.isKnownPerson(title, if (contactsGranted(this)) contactNames() else emptyList())) {
             // группа, рассылка или незнакомый чат — автоответа нет.
             // Но если нет доступа к контактам, Джарвис не может отличить
             // «своего» от чужого вообще — подскажем, что нужно выдать доступ.
+            AutoLog.add(this, "Пропустил «$title»: группа/рассылка/незнакомый чат — не отвечаю.")
             if (!contactsGranted(this)) {
                 hintOnce(
                     this,
@@ -203,6 +233,7 @@ class AutoReplyService : NotificationListenerService() {
         if (Prefs.autoReplyScreenOff(this) && screenOn()) {
             // режим «только при выключенном экране»: пропускаем молча, но раз в день
             // напомним, почему ничего не происходит (иначе выглядит как поломка)
+            AutoLog.add(this, "Пропустил «$title»: экран включён, а включён режим «только при выключенном экране».")
             hintOnce(
                 this,
                 "Сообщение из «$title» пропустил: включён режим «отвечать, только когда экран выключен», а экран сейчас горит. " +
@@ -212,12 +243,18 @@ class AutoReplyService : NotificationListenerService() {
         }
 
         val now = System.currentTimeMillis()
-        if (now - sbn.postTime > 60_000) return   // очень старое уведомление
+        if (now - sbn.postTime > 60_000) {
+            AutoLog.add(this, "Пропустил «$title»: уведомление старше минуты.")
+            return
+        }
 
         // один и тот же текст несколько раз подряд — это дубль уведомления
         val dk = "$appLabel|$title|${AutoReplyLogic.norm(text)}"
         val was = seen[dk]
-        if (was != null && now - was < 15_000) return
+        if (was != null && now - was < 15_000) {
+            AutoLog.add(this, "Пропустил «$title»: дубль того же сообщения.")
+            return
+        }
         pruneSeen(now)
         seen[dk] = now
 
@@ -233,6 +270,8 @@ class AutoReplyService : NotificationListenerService() {
                 ?.filter { it.remoteInputs?.isNotEmpty() == true }
             if (!replyActions.isNullOrEmpty()) {
                 chat.latestActions = replyActions.toTypedArray()
+            } else {
+                AutoLog.add(this, "«$title»: в уведомлении нет действия «Ответить» — ответить не смогу.")
             }
 
             if (!chat.busy) {
@@ -242,6 +281,54 @@ class AutoReplyService : NotificationListenerService() {
             } else {
                 chat.rerun = true   // пока думаем — пришли ещё сообщения; учтём
             }
+        }
+    }
+
+    /**
+     * Кто написал: заголовок уведомления, а если его нет — имя из первого
+     * сообщения MessagingStyle.
+     */
+    private fun extractTitle(n: Notification): String {
+        n.extras.getCharSequence(Notification.EXTRA_TITLE)
+            ?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        try {
+            val msgs = n.extras.getParcelableArray(EXTRA_MESSAGES)
+            if (msgs != null) {
+                val m = msgs.filterIsInstance<Notification.MessagingStyle.Message>()
+                    .lastOrNull()
+                if (m?.sender?.isNotBlank() == true) return m.sender.toString().trim()
+            }
+        } catch (e: Throwable) { }
+        return ""
+    }
+
+    /**
+     * Текст сообщения: обычный текст, иначе строки-массив, иначе BigText,
+     * иначе сообщения MessagingStyle (последнее как текущее, остальные как
+     * контекст в конце). Пусто — прочитать не удалось.
+     */
+    private fun extractText(n: Notification): String {
+        val extras = n.extras
+        extras.getCharSequence(Notification.EXTRA_TEXT)
+            ?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        lines?.joinToString("\n") { it.toString().trim() }
+            ?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        // последний способ — MessagingStyle («android.messages»)
+        return try {
+            val msgs = extras.getParcelableArray(EXTRA_MESSAGES)
+            if (msgs == null) return ""
+            val style = msgs.filterIsInstance<Notification.MessagingStyle.Message>()
+            if (style.isEmpty()) return ""
+            style.takeLast(6).joinToString("\n") { m ->
+                val who = m.sender?.toString()?.trim().orEmpty()
+                val t = m.text?.toString()?.trim().orEmpty()
+                if (who.isEmpty()) t else "$who: $t"
+            }.trim().takeIf { it.isNotEmpty() }.orEmpty()
+        } catch (e: Throwable) {
+            ""
         }
     }
 
@@ -313,6 +400,7 @@ class AutoReplyService : NotificationListenerService() {
         }
 
         if (!Llm.ready(this)) {
+            AutoLog.add(this, "«${chat.title}»: нет настроенного ИИ — ответить не могу.")
             Notify.autoReplyNoModel(this, chat.title)
             return
         }
@@ -323,17 +411,20 @@ class AutoReplyService : NotificationListenerService() {
             Prefs.autoReplyRules(this), location, nowText
         )
 
+        AutoLog.add(this, "«${chat.title}»: думаю над ответом (сообщений: ${snapshot.size})")
         val reply: String
         try {
             val raw = Llm.complete(this, AUTO_SYSTEM, prompt, maxTokens = 260)
             reply = AutoReplyLogic.cleanReply(AutoReplyLogic.parseReply(raw))
         } catch (e: Throwable) {
+            AutoLog.add(this, "«${chat.title}»: ошибка модели: ${e.message?.take(120) ?: "неизвестно"}")
             Notify.autoReplyError(this, chat.title, e.message)
             return
         }
 
         if (reply.isEmpty()) {
             // модель решила, что отвечать не нужно
+            AutoLog.add(this, "«${chat.title}»: модель решила, что ответ не нужен.")
             if (Prefs.autoReplyVoice(this) && now - lastVoiceNote > 60_000) {
                 lastVoiceNote = now
                 speak(listOfNotNull(chat.title, last).joinToString(": ").take(160))
@@ -344,17 +435,22 @@ class AutoReplyService : NotificationListenerService() {
         val allowed = synchronized(repliesAt) {
             AutoReplyLogic.allowed(repliesAt, System.currentTimeMillis())
         }
-        if (!allowed) return   // лимит частоты — молча пропускаем
+        if (!allowed) {
+            AutoLog.add(this, "«${chat.title}»: лимит частоты — пропустил.")
+            return
+        }
 
         val sent = sendReply(actions, reply)
         if (sent) {
             synchronized(repliesAt) { repliesAt.add(System.currentTimeMillis()) }
             chat.lastReplyAt = System.currentTimeMillis()
+            AutoLog.add(this, "✔ Отправил «${chat.title}»: $reply")
             Notify.autoReplySent(this, chat.appLabel, chat.title, reply)
             if (Prefs.autoReplyVoice(this)) {
                 speak("Ответил ${chat.title}: $reply".take(200))
             }
         } else {
+            AutoLog.add(this, "✖ «${chat.title}»: действие «Ответить» не сработало — ответьте сами.")
             Notify.autoReplyNoAction(this, chat.title)
         }
     }
@@ -362,20 +458,25 @@ class AutoReplyService : NotificationListenerService() {
     /** Отправка через системное действие «Ответить» (как с часов). */
     private fun sendReply(actions: Array<Notification.Action>?, reply: String): Boolean {
         if (actions.isNullOrEmpty()) return false
+        var lastErr: String? = null
         for (a in actions) {
             val ris = a.remoteInputs ?: continue
             if (ris.isEmpty()) continue
             try {
+                // кладём текст во все поля ввода действия и отправляем через
+                // PendingIntent самого уведомления (канонический способ)
                 val intent = Intent()
                 val results = Bundle()
-                results.putCharSequence(ris[0].resultKey, reply)
+                for (ri in ris) results.putCharSequence(ri.resultKey, reply)
                 RemoteInput.addResultsToIntent(ris, intent, results)
                 a.actionIntent.send(this, 0, intent)
                 return true
             } catch (e: Exception) {
+                lastErr = e.message
                 // пробуем следующее действие
             }
         }
+        AutoLog.add(this, "Отправка не удалась: ${lastErr?.take(120) ?: "действий с полем ввода нет"}")
         return false
     }
 

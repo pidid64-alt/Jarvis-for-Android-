@@ -31,6 +31,7 @@
     <string name="autoreply_master">Автоответчик</string>
     <string name="autoreply_notif_access">Доступ к уведомлениям</string>
     <string name="autoreply_diag_button">Проверить, почему не отвечает</string>
+    <string name="autoreply_log_button">Журнал автоответчика</string>
     <string name="autoreply_notif_access_ok">Доступ к уведомлениям выдан ✔</string>
     <string name="autoreply_notif_access_bad">Нужен «Доступ к уведомлениям»: нажмите кнопку и включите «Джарвис — автоответчик».</string>
     <string name="autoreply_screen_off">Отвечать, только когда экран выключен</string>
