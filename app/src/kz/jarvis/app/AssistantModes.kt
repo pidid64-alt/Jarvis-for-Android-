@@ -51,7 +51,9 @@ object AssistantModes {
             }
         }
 
-        if (!isAboutAutoReply(s)) return null
+        if (!isAboutAutoReply(s)) {
+            return if (isRuleCommand(s)) AutoReplyCommand.RULES_ADD else null
+        }
 
         // просьба проверить / жалоба, что не работает — полная диагностика
         if (Regex("(?:проверь|диагностик|почему|что мешает|разберись)|не работает|не отвечает|не сработал|не срабатыва")
@@ -87,6 +89,8 @@ object AssistantModes {
      * «запомни правило: если зовут гулять — отвечай, что я занят».
      */
     fun isRuleCommand(s: String): Boolean {
+        // Короткая форма тоже команда: «не отвечай маме никогда».
+        if (Regex("(?:никогда\\s+)?не\\s+(?:отвечай|пиши)\\s+.+").containsMatchIn(s)) return true
         if (!Regex("правил").containsMatchIn(s)) return false
         if (isAboutAutoReply(s)) return true
         return Regex("автоответ|отвеча(?:й|ть)|пиши|писать|говори|не соглашайся").containsMatchIn(s) &&
@@ -109,6 +113,10 @@ object AssistantModes {
         ).find(s)?.let { m ->
             val t = m.groupValues[1].trim()
             if (t.isNotEmpty()) return t
+        }
+        // Короткая форма без слова «правило».
+        Regex("^(?:никогда\\s+)?не\\s+(?:отвечай|пиши)\\s+(.+)$").find(s)?.let { m ->
+            return "не ${if (s.contains("пиши")) "пиши" else "отвечай"} ${m.groupValues[1].trim()}"
         }
         return null
     }

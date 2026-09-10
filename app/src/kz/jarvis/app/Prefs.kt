@@ -40,6 +40,10 @@ object Prefs {
     private const val K_DECK_PATH = "deck_path"
     private const val K_DECK_TOPIC = "deck_topic"
 
+    // изучение темы и наблюдение за экраном
+    private const val K_STUDY_TOPIC = "study_pending_topic"
+    private const val K_SCREEN_WATCH = "screen_watch"
+
     private fun sp(c: Context) = c.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
     // ---------------------------------------------------------- провайдер ИИ
@@ -217,6 +221,15 @@ object Prefs {
     fun lastDeckUri(c: Context): String = sp(c).getString(K_DECK_URI, "").orEmpty()
     fun lastDeckPath(c: Context): String = sp(c).getString(K_DECK_PATH, "").orEmpty()
     fun lastDeckTopic(c: Context): String = sp(c).getString(K_DECK_TOPIC, "").orEmpty()
+
+    /** Тема, для которой пользователь ещё не выбрал «рассказать» или «видео». */
+    fun pendingStudyTopic(c: Context): String = sp(c).getString(K_STUDY_TOPIC, "").orEmpty()
+    fun setPendingStudyTopic(c: Context, topic: String) = sp(c).edit().putString(K_STUDY_TOPIC, topic).apply()
+    fun clearPendingStudyTopic(c: Context) = sp(c).edit().remove(K_STUDY_TOPIC).apply()
+
+    /** Проактивный просмотр экрана через сервис специальных возможностей. */
+    fun screenWatch(c: Context): Boolean = sp(c).getBoolean(K_SCREEN_WATCH, false)
+    fun setScreenWatch(c: Context, value: Boolean) = sp(c).edit().putBoolean(K_SCREEN_WATCH, value).apply()
 
     fun setLastDeck(c: Context, uri: String, path: String, topic: String) = sp(c).edit()
         .putString(K_DECK_URI, uri)

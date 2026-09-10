@@ -61,6 +61,7 @@ class SettingsActivity : Activity() {
     private lateinit var swAutoScreen: Switch
     private lateinit var swAutoLoc: Switch
     private lateinit var swAutoVoice: Switch
+    private lateinit var swScreenWatch: Switch
     private lateinit var etAutoRules: EditText
 
     /** Своя озвучка — чтобы дать послушать голос прямо в настройках. */
@@ -111,6 +112,7 @@ class SettingsActivity : Activity() {
         swAutoScreen = findViewById(R.id.swAutoScreen)
         swAutoLoc = findViewById(R.id.swAutoLoc)
         swAutoVoice = findViewById(R.id.swAutoVoice)
+        swScreenWatch = findViewById(R.id.swScreenWatch)
         etAutoRules = findViewById(R.id.etAutoRules)
 
         setupVoice()
@@ -339,6 +341,11 @@ class SettingsActivity : Activity() {
         swAutoVoice.isChecked = Prefs.autoReplyVoice(this)
         etAutoRules.setText(Prefs.autoReplyRules(this))
         etAutoRules.hint = getString(R.string.autoreply_rules_hint)
+        swScreenWatch.isChecked = Prefs.screenWatch(this)
+        swScreenWatch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setScreenWatch(this, checked)
+            Toast.makeText(this, if (checked) "Просмотр экрана включён — нужен доступ «Джарвис — автоотправка»" else "Просмотр экрана выключен", Toast.LENGTH_LONG).show()
+        }
 
         swAuto.setOnCheckedChangeListener { _, checked ->
             Prefs.setAutoReply(this, checked)
