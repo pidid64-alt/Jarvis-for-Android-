@@ -40,9 +40,11 @@
     <string name="autoreply_loc_desc">На вопрос «ты где» Джарвис возьмёт последнее известное место телефона, превратит в адрес + ссылку на Google Карты и ответит им.</string>
     <string name="autoreply_voice">Озвучивать действия автоответчика</string>
     <string name="autoreply_voice_desc">Вслух: «Мама пишет: …» и «Я ответил маме: …».</string>
-    <string name="autoreply_rules_title">Правила для автоответов</string>
-    <string name="autoreply_rules_hint">например: если зовут гулять — говори, что я занят</string>
-    <string name="autoreply_rules_desc">Учитываются при каждом ответе. Можно голосом: «добавь правило: …». По одному правилу в строке.</string>
+    <string name="screen_watch">Иногда анализировать экран</string>
+    <string name="screen_watch_desc">Сервис специальных возможностей раз в несколько минут читает видимый текст и может сам начать короткий разговор по теме. Выключено по умолчанию.</string>
+    <string name="autoreply_rules_title">Системный промпт автоответчика</string>
+    <string name="autoreply_rules_hint">например: никогда не отвечай маме</string>
+    <string name="autoreply_rules_desc">Это обязательные правила перед каждым ответом. Например: «никогда не отвечай маме». По одному правилу в строке. Можно голосом: «добавь правило: …».</string>
     <string name="autoreply_no_model">Для автоответов нужен настроенный провайдер ИИ — выберите его и вставьте ключ выше.</string>
     <string name="autoreply_empty_rules">Правил пока нет.</string>
 

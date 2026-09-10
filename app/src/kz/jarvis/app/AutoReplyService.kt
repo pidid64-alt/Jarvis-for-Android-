@@ -391,6 +391,13 @@ class AutoReplyService : NotificationListenerService() {
 
         val last = snapshot.last()
 
+        // Запреты вроде «никогда не отвечай маме» — не рекомендация модели,
+        // а жёсткое правило: даже при ошибочном ответе модели ничего не уйдёт.
+        if (AutoReplyLogic.blockedByOwnerRules(chat.title, Prefs.autoReplyRules(this))) {
+            AutoLog.add(this, "«${chat.title}»: пропущен по системному правилу владельца.")
+            return
+        }
+
         // геолокацию подключаем, только когда спрашивают «где я»
         var location: String? = null
         if (Prefs.autoReplyLoc(this) && AutoReplyLogic.asksLocation(last)) {

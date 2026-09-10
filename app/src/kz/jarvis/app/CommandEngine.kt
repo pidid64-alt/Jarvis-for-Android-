@@ -101,6 +101,9 @@ object CommandEngine {
         // ---------- голос Джарвиса ----------
         voice(ctx, s)?.let { return it }
 
+        // ---------- изучение темы: сначала уточняем формат ----------
+        study(ctx, s)?.let { return it }
+
         // ---------- поиск в интернете, Клод и презентации ----------
         research(ctx, s)?.let { return it }
 
@@ -194,6 +197,39 @@ object CommandEngine {
         return Outcome(reply)
     }
 
+    // ------------------------------------------ изучение темы
+
+    /**
+     * «Помоги изучить тему X» — не запускает длинный ответ вслепую: сначала
+     * предлагает рассказ или видео. Выбор хранится, поэтому следующую фразу
+     * («расскажи»/«включи видео») можно сказать голосом без повторения темы.
+     */
+    private fun study(ctx: Context, s: String): Outcome? {
+        val pending = Prefs.pendingStudyTopic(ctx)
+        if (pending.isNotBlank()) {
+            val video = Regex("видео|ролик|ютуб|youtube|посмотрим|покажи").containsMatchIn(s)
+            val tell = Regex("расскаж|объясн|текст|устно|сам").containsMatchIn(s)
+            if (video || tell) {
+                Prefs.clearPendingStudyTopic(ctx)
+                if (video) {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + q(pending)))
+                        .withTask(ctx)
+                    return Outcome("Включаю видео по теме «$pending».", intent, endDialog = true)
+                }
+                val plan = ResearchPlan.Plan(ResearchPlan.Kind.RESEARCH, pending)
+                return Outcome("Готовлю понятное объяснение темы «$pending».", async = { c, done ->
+                    done(Research.handle(c, plan))
+                })
+            }
+        }
+        val m = Regex("^(?:помоги|давай)\\s+(?:мне\\s+)?(?:изучить|выучить|разобраться\\s+в)\\s+(?:тему\\s+)?(.+)$")
+            .find(s) ?: return null
+        val topic = m.groupValues[1].trim().trim('.', ',', '!', '?')
+        if (topic.isBlank()) return Outcome("Какую тему изучаем, сэр?")
+        Prefs.setPendingStudyTopic(ctx, topic)
+        return Outcome("Конечно. По теме «$topic» рассказать или включить видео?")
+    }
+
     // ------------------------------------------ поиск в интернете и презентации
 
     /**
@@ -281,7 +317,7 @@ object CommandEngine {
             • «голос Джарвиса», «голос брони», «женский голос», «говори ниже», «проверь голос»
             • «какой у тебя провайдер», «смени провайдера», «настройки Джарвиса»
             • «включи непрерывный диалог» — говорить подряд, без повторного «Джарвис»
-            • «включи автоответ» — сам отвечу в WhatsApp/Telegram; «добавь правило: …»
+            • «включи автоответ» — сам отвечу в WhatsApp/Telegram; «добавь правило: никогда не отвечай маме»
             • «спи 10 минут», «стоп», «что ты умеешь»
             Подробности по темам: «команды конвертера», «команды телефона», «календарные команды»,
             «команды для текста», «команды-развлечения», «команды списков», «курсы валют»,

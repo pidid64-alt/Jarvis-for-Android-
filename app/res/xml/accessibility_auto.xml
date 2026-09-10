@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Спец. возможность «Джарвис — автоотправка»: нажимает «Отправить» в
-     WhatsApp, когда сам Джарвис отправляет сообщение по вашей команде. -->
+     WhatsApp, когда сам Джарвис отправляет сообщение по вашей команде. При
+     отдельной опции просмотра экрана читает только видимый текст UI. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
@@ -8,5 +9,4 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/auto_send_a11y_desc"
     android:notificationTimeout="150"
-    android:packageNames="com.whatsapp,com.whatsapp.w4b"
     android:settingsActivity="kz.jarvis.app.SettingsActivity" />
