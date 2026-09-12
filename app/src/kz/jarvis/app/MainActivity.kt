@@ -57,6 +57,9 @@ class MainActivity : Activity() {
     /** Сколько раз подряд распознавание «не услышало» в непрерывном диалоге. */
     private var autoMisses = 0
 
+    /** id запроса от приоритетного контакта, уже показанного в чате. */
+    private var shownPriorityId = -1
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -139,6 +142,22 @@ class MainActivity : Activity() {
         refreshWakeIcon()
         WakeWordService.notifyUi(this, true)
         ensureWakeService()
+        maybeShowPriority()
+    }
+
+    /**
+     * Если есть неотвеченное сообщение от приоритетного контакта, показываем
+     * его в чате: «Мама пишет: «…» — Что ответить Маме?» Ответ владельца
+     * (текстом или голосом) уйдёт в CommandEngine → PriorityInbox.
+     */
+    private fun maybeShowPriority() {
+        val r = PriorityInbox.current() ?: return
+        if (r.id == shownPriorityId) return
+        shownPriorityId = r.id
+        val text = PriorityInbox.notifyText(r)
+        addMessage(text, false)
+        Conversation.add(text, false)
+        if (Prefs.ttsOn(this) && Prefs.priorityVoice(this)) tts.speak(text)
     }
 
     override fun onPause() {
@@ -278,6 +297,7 @@ class MainActivity : Activity() {
             Conversation.add(reply, false)
         }
         addMessage(reply, false)
+        maybeShowPriority()
         if (!silent && Prefs.ttsOn(this)) {
             tts.speak(reply) { maybeAutoListen() }
         } else {

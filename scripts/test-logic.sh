@@ -5,7 +5,8 @@
 #    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Timezones,
 #                           Units,LifeCalc,DateFacts,TextTools,Randoms,
 #                           Persona,Providers,LlmRequests,VoiceProfile,
-#                           ResearchPlan,Deck,WebSearch}.kt
+#                           ResearchPlan,Deck,WebSearch,AutoReplyLogic,
+#                           ChatMedia,PriorityLogic}.kt
 #  + тестовая обёртка tools/LogicTest.kt. Выполняется на JVM.
 #
 #  Требуется тот же тулчейн, что и для scripts/build-apk.sh
@@ -59,6 +60,7 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
     "$ROOT/app/src/kz/jarvis/app/AssistantModes.kt" \
     "$ROOT/app/src/kz/jarvis/app/AutoReplyLogic.kt" \
     "$ROOT/app/src/kz/jarvis/app/ChatMedia.kt" \
+    "$ROOT/app/src/kz/jarvis/app/PriorityLogic.kt" \
   "$ROOT/tools/LogicTest.kt" 2>&1 | grep -v "^WARNING" | grep -v "jansi" | grep -v "native" || true
 
 if [ -z "$(find "$OUT/classes" -name '*.class')" ]; then

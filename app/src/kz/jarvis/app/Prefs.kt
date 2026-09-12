@@ -19,6 +19,20 @@ object Prefs {
     // звонки: всегда выбирать первую SIM, когда их две
     private const val K_CALL_SIM = "call_sim_first"
 
+    // приоритетные контакты («Мама пишет: … — что ответить?»)
+    private const val K_PRIO_ON = "priority_on"
+    private const val K_PRIO_LIST = "priority_contacts"
+    private const val K_PRIO_DRAFT = "priority_draft_others"
+    private const val K_PRIO_VOICE = "priority_voice"
+    private const val K_PRIO_REMIND = "priority_remind"
+    private const val K_PRIO_REMIND_MIN = "priority_remind_min"
+    private const val K_PRIO_TEMPLATES = "priority_templates"
+    private const val K_PRIO_LEARN = "priority_learn"
+    private const val K_PRIO_LEARNED = "priority_learned"
+    private const val K_PRIO_STYLES = "priority_styles"
+    private const val K_PRIO_AUTO = "priority_auto_template"
+    private const val K_PRIO_APPROVED = "priority_approved"
+
     // автоответчик в мессенджерах
     private const val K_AUTO = "auto_reply"
     private const val K_AUTO_SCREEN = "auto_reply_screen_off"
@@ -123,6 +137,79 @@ object Prefs {
     /** Две SIM: при звонке всегда выбирать первую (SIM 1), без системного вопроса. */
     fun callSimFirst(c: Context): Boolean = sp(c).getBoolean(K_CALL_SIM, true)
     fun setCallSimFirst(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_CALL_SIM, v).apply()
+
+    // ------------------------------------------------------ приоритетные контакты
+
+    /**
+     * Режим «приоритетные контакты»: Джарвис не отвечает за владельца сам, а
+     * показывает сообщение и спрашивает, что ответить.
+     */
+    fun priorityOn(c: Context): Boolean = sp(c).getBoolean(K_PRIO_ON, true)
+    fun setPriorityOn(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_PRIO_ON, v).apply()
+
+    /** Список приоритетных контактов — по одному имени в строке. */
+    fun priorityList(c: Context): String = sp(c).getString(K_PRIO_LIST, "").orEmpty()
+    fun setPriorityList(c: Context, v: String) =
+        sp(c).edit().putString(K_PRIO_LIST, v.trim()).apply()
+
+    fun priorityContacts(c: Context): List<String> = PriorityLogic.parseList(priorityList(c))
+
+    fun isPriority(c: Context, chatTitle: String): Boolean =
+        PriorityLogic.matches(chatTitle, priorityContacts(c))
+
+    /** Предлагать черновик и для остальных контактов (только с подтверждения). */
+    fun priorityDraftOthers(c: Context): Boolean = sp(c).getBoolean(K_PRIO_DRAFT, false)
+    fun setPriorityDraftOthers(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_PRIO_DRAFT, v).apply()
+
+    /** Озвучивать вслух «Мама пишет: …» и «Отправил маме: …». */
+    fun priorityVoice(c: Context): Boolean = sp(c).getBoolean(K_PRIO_VOICE, false)
+    fun setPriorityVoice(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_PRIO_VOICE, v).apply()
+
+    /** Мягко напоминать о непрочитанном сообщении от приоритетного контакта. */
+    fun priorityRemind(c: Context): Boolean = sp(c).getBoolean(K_PRIO_REMIND, true)
+    fun setPriorityRemind(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_PRIO_REMIND, v).apply()
+
+    /** Через сколько минут напоминать о неотвеченном (по умолчанию 10). */
+    fun priorityRemindMin(c: Context): Int = sp(c).getInt(K_PRIO_REMIND_MIN, 10).coerceIn(1, 240)
+    fun setPriorityRemindMin(c: Context, v: Int) =
+        sp(c).edit().putInt(K_PRIO_REMIND_MIN, v.coerceIn(1, 240)).apply()
+
+    /** Шаблоны ответов: строки вида «еда = Да, мам, уже поел». */
+    fun priorityTemplates(c: Context): String = sp(c).getString(K_PRIO_TEMPLATES, "").orEmpty()
+    fun setPriorityTemplates(c: Context, v: String) =
+        sp(c).edit().putString(K_PRIO_TEMPLATES, v.trim()).apply()
+
+    /** Учиться на прежних ответах владельца (предлагать частый вариант). */
+    fun priorityLearn(c: Context): Boolean = sp(c).getBoolean(K_PRIO_LEARN, true)
+    fun setPriorityLearn(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_PRIO_LEARN, v).apply()
+
+    /** Накопленные ответы владельца по категориям (см. PriorityLogic.learn). */
+    fun priorityLearned(c: Context): String = sp(c).getString(K_PRIO_LEARNED, "").orEmpty()
+    fun setPriorityLearned(c: Context, v: String) =
+        sp(c).edit().putString(K_PRIO_LEARNED, v.trim()).apply()
+
+    /** Прежние ответы по контактам — из них выводим стиль общения. */
+    fun priorityStyles(c: Context): String = sp(c).getString(K_PRIO_STYLES, "").orEmpty()
+    fun setPriorityStyles(c: Context, v: String) =
+        sp(c).edit().putString(K_PRIO_STYLES, v.trim()).apply()
+
+    /**
+     * Режим «автоответ по шаблону»: Джарвис подставляет готовый (шаблонный или
+     * выученный) ответ сам. Первую отправку в каждой категории всё равно
+     * показывает владельцу и ждёт «да» — см. PriorityLogic.autoPlan.
+     */
+    fun priorityAutoTemplate(c: Context): Boolean = sp(c).getBoolean(K_PRIO_AUTO, false)
+    fun setPriorityAutoTemplate(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_PRIO_AUTO, v).apply()
+
+    /** Категории, в которых владелец уже подтвердил отправку шаблона. */
+    fun priorityApproved(c: Context): String = sp(c).getString(K_PRIO_APPROVED, "").orEmpty()
+    fun setPriorityApproved(c: Context, v: String) =
+        sp(c).edit().putString(K_PRIO_APPROVED, v.trim()).apply()
 
     // ---------------------------------------------------------- автоответчик
 

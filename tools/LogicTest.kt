@@ -8,6 +8,7 @@ import kz.jarvis.app.Deck
 import kz.jarvis.app.LifeCalc
 import kz.jarvis.app.LlmRequests
 import kz.jarvis.app.Persona
+import kz.jarvis.app.PriorityLogic
 import kz.jarvis.app.Providers
 import kz.jarvis.app.MathEngine
 import kz.jarvis.app.Randoms
@@ -591,6 +592,272 @@ fun main() {
     check("местный 10 цифр", "77712345678", ChatMedia.phoneForWa("7712345678"))
     check("сломанный номер", null, ChatMedia.phoneForWa("номер не найден"))
     check("пусто", null, ChatMedia.phoneForWa(""))
+
+    println("== Приоритетные контакты: список и узнавание чата ==")
+    val list = PriorityLogic.parseList("Мама\nПапа\n\nЖена\nмама")
+    check("список без пустых и дублей", 3, list.size)
+    check("список: порядок сохранён", "Мама, Папа, Жена", list.joinToString(", "))
+    check("есть ли имя (без регистра)", true, PriorityLogic.hasName("Мама\nПапа", "мама"))
+    check("нет имени", false, PriorityLogic.hasName("Мама", "папа"))
+    check("добавление", "Мама\nПапа\nЖена", PriorityLogic.addName("Мама\nПапа", "Жена"))
+    check("добавление дубля ничего не меняет", "Мама", PriorityLogic.addName("Мама", "  мама "))
+    check("удаление", "Папа" to true, PriorityLogic.removeName("Мама\nПапа", "мама"))
+    check("удаление того, чего нет", "Мама" to false, PriorityLogic.removeName("Мама", "папа"))
+    check("чат «мама» — приоритетный", "Мама", PriorityLogic.matchName("мама", list))
+    check("чат «Мама (моб.)» — приоритетный", "Мама", PriorityLogic.matchName("Мама (моб.)", list))
+    check("чат «Саша Иванов» по контакту «Саша»", "Саша",
+        PriorityLogic.matchName("Саша Иванов", listOf("Саша")))
+    check("контакт длиннее названия чата", "Мария", PriorityLogic.matchName("Мари", listOf("Мария")))
+    check("группа «Коллеги» — не приоритет", null, PriorityLogic.matchName("Коллеги", list))
+    check("пустой список — никого", false, PriorityLogic.matches("Мама", emptyList()))
+    check("пустое имя чата — никого", false, PriorityLogic.matches("", list))
+
+    println("== Приоритетные контакты: фразы диалога ==")
+    check("дательный: мама", "Маме", PriorityLogic.dative("Мама"))
+    check("дательный: папа", "Папе", PriorityLogic.dative("Папа"))
+    check("дательный: жена", "Жене", PriorityLogic.dative("Жена"))
+    check("дательный: Саша", "Саше", PriorityLogic.dative("Саша"))
+    check("дательный: Андрей", "Андрею", PriorityLogic.dative("Андрей"))
+    check("дательный: Александр", "Александру", PriorityLogic.dative("Александр"))
+    check("дательный: Мария", "Марии", PriorityLogic.dative("Мария"))
+    check("дательный: Игорь", "Игорю", PriorityLogic.dative("Игорь"))
+    check("дательный: два слова", "Мама Лене", PriorityLogic.dative("Мама Лена"))
+    check("дательный: что не склоняем — оставляем", "Петренко", PriorityLogic.dative("Петренко"))
+    check("входящее", "Мама пишет: «Ты покушал?»", PriorityLogic.incomingLine("Мама", "Ты покушал?"))
+    check("вопрос «что ответить»", "Мама пишет: «Ты покушал?» — Что ответить Маме?",
+        PriorityLogic.askLine("Мама", "Ты покушал?"))
+    check("подтверждение", "Отправляю Маме: «Да, мам, уже поел» — ок?",
+        PriorityLogic.confirmLine("Мама", "Да, мам, уже поел"))
+    check("об отправке", "Отправил Маме: «Да, мам, уже поел».",
+        PriorityLogic.sentLine("Мама", "Да, мам, уже поел"))
+    check("отмена", "Отменил, сэр — Маме ничего не ушло.", PriorityLogic.cancelledLine("Мама"))
+    check("минуты: 1", "1 минуту", PriorityLogic.minutesString(1))
+    check("минуты: 2", "2 минуты", PriorityLogic.minutesString(2))
+    check("минуты: 11", "11 минут", PriorityLogic.minutesString(11))
+    check("минуты: 21", "21 минуту", PriorityLogic.minutesString(21))
+
+    println("== Приоритетные контакты: да / нет / пропуск ==")
+    check("«да» — подтверждение", true, PriorityLogic.isYes("да"))
+    check("«ок» — подтверждение", true, PriorityLogic.isYes("ок"))
+    check("«отправляй» — подтверждение", true, PriorityLogic.isYes("отправляй"))
+    check("«подтверждаю» — подтверждение", true, PriorityLogic.isYes("Подтверждаю"))
+    check("«давай отправляй» — подтверждение", true, PriorityLogic.isYes("давай отправляй"))
+    check("«да, только добавь…» — правка, а не «да»", false,
+        PriorityLogic.isYes("да, только добавь что задержусь"))
+    check("«нет» — не подтверждение", false, PriorityLogic.isYes("нет"))
+    check("«нет» — отказ", true, PriorityLogic.isNo("нет"))
+    check("«отмена» — отказ", true, PriorityLogic.isNo("отмена"))
+    check("«не отправляй» — отказ", true, PriorityLogic.isNo("не отправляй"))
+    check("«передумал» — отказ", true, PriorityLogic.isNo("передумал"))
+    check("«скоро буду» — не отказ", false, PriorityLogic.isNo("скоро буду"))
+    check("«не отвечай» — пропуск", true, PriorityLogic.isSkip("не отвечай"))
+    check("«пропусти» — пропуск", true, PriorityLogic.isSkip("пропусти"))
+    check("«я сам отвечу» — пропуск", true, PriorityLogic.isSkip("я сам отвечу"))
+    check("«спроси ещё раз» — повтор", true, PriorityLogic.isRepeat("что там?"))
+    check("«прочитай ещё раз» — повтор", true, PriorityLogic.isRepeat("прочитай ещё раз"))
+    check("обычный ответ — не команда", false, PriorityLogic.isRepeat("скажи что скоро буду"))
+
+    println("== Приоритетные контакты: категории ==")
+    check("«ты покушал?» — еда", PriorityLogic.Category.FOOD, PriorityLogic.categorize("Ты покушал?"))
+    check("«где ты?» — где", PriorityLogic.Category.WHERE, PriorityLogic.categorize("Ты где?"))
+    check("«когда придёшь?» — когда", PriorityLogic.Category.WHEN, PriorityLogic.categorize("Когда придёшь?"))
+    check("«как дела?» — дела", PriorityLogic.Category.MOOD, PriorityLogic.categorize("Как дела?"))
+    check("«какие планы на вечер?» — планы", PriorityLogic.Category.PLANS,
+        PriorityLogic.categorize("Какие планы на вечер?"))
+    check("«ты занят?» — занят", PriorityLogic.Category.BUSY, PriorityLogic.categorize("Ты занят?"))
+    check("«перезвони» — звонок", PriorityLogic.Category.CALL, PriorityLogic.categorize("Перезвони, срочно"))
+    check("«скинь денег» — деньги", PriorityLogic.Category.MONEY, PriorityLogic.categorize("Скинь денег на карту"))
+    check("«спасибо» — благодарность", PriorityLogic.Category.THANKS, PriorityLogic.categorize("Спасибо большое!"))
+    check("«как здоровье?» — здоровье", PriorityLogic.Category.HEALTH, PriorityLogic.categorize("Как здоровье?"))
+    check("фразу без темы — в другое", PriorityLogic.Category.OTHER, PriorityLogic.categorize("Привет, это я"))
+    check("категория по слову «еда»", PriorityLogic.Category.FOOD, PriorityLogic.Category.from("еда"))
+    check("категория по слову «еды»", PriorityLogic.Category.FOOD, PriorityLogic.Category.from("еды"))
+    check("категория по слову «поел»", PriorityLogic.Category.FOOD, PriorityLogic.Category.from("поел"))
+    check("неизвестное слово — не категория", null, PriorityLogic.Category.from("квадратные штаны"))
+
+    println("== Приоритетные контакты: шаблоны и обучение ==")
+    val tpl = "еда = Да, мам, уже поел\nгде: на работе"
+    val tplMap = PriorityLogic.parseTemplates(tpl)
+    check("шаблон «еда»", "Да, мам, уже поел", tplMap["еда"])
+    check("шаблон «где»", "на работе", tplMap["где"])
+    check("шаблон по категории", "Да, мам, уже поел",
+        PriorityLogic.templateFor(tpl, PriorityLogic.Category.FOOD))
+    check("шаблона нет", null, PriorityLogic.templateFor(tpl, PriorityLogic.Category.MONEY))
+    check("запись шаблона", "еда = уже поел" to true, PriorityLogic.setTemplate("", "еда", "уже поел"))
+    check("перезапись шаблона", "еда = новый", PriorityLogic.setTemplate("еда = старый", "еда", "новый").first)
+    check("шаблон в чужой категории не записался", false,
+        PriorityLogic.setTemplate("", "квадратные штаны", "текст").second)
+    check("обучение: первая запись", "еда|1|Да, поел",
+        PriorityLogic.learn("", PriorityLogic.Category.FOOD, "Да, поел"))
+    check("обучение: повтор считаем", "еда|2|Да, поел",
+        PriorityLogic.learn("еда|1|Да, поел", PriorityLogic.Category.FOOD, "Да, поел"))
+    check("обучение: другой ответ рядом", "еда|1|Нет ещё\neда|1|Да, поел".replace("\n", "|").length > 0, true)
+    val learned = PriorityLogic.learn("еда|2|Да, поел", PriorityLogic.Category.FOOD, "Нет ещё")
+    check("обучение: частый ответ первый", "Да, поел",
+        PriorityLogic.bestLearned(learned, PriorityLogic.Category.FOOD))
+    check("обучение: счётчик повторов", 3, PriorityLogic.learnedHits(learned, PriorityLogic.Category.FOOD))
+    check("обучение: в другой категории пусто", null,
+        PriorityLogic.bestLearned(learned, PriorityLogic.Category.WHERE))
+
+    println("== Приоритетные контакты: стиль общения ==")
+    val stCasual = PriorityLogic.styleFrom(listOf("да, мам", "ок мам"))
+    check("свойский стиль: строчные", true, stCasual.noCaps)
+    check("свойский стиль: без точек", false, stCasual.endPunct)
+    check("свойский стиль: коротко", 2, stCasual.avgWords)
+    val stFormal = PriorityLogic.styleFrom(listOf("Здравствуйте, Иван Иванович.", "Добрый день! Как ваши дела?"))
+    check("формальный стиль: вежливый", true, stFormal.formal)
+    check("формальный стиль: точки", true, stFormal.endPunct)
+    check("пустые образцы — стиль по умолчанию", PriorityLogic.Style(), PriorityLogic.styleFrom(emptyList()))
+    check("подсказка стиля непустая", true, stCasual.hint().isNotEmpty())
+    val styles = PriorityLogic.addStyle("", "Мама", "да, мам, поел")
+    check("стиль контакта сохранён", "Мама|да, мам, поел", styles)
+    check("стиль контакта прочитан", true, PriorityLogic.styleOf(styles, "мама").noCaps)
+    check("стиль чужого контакта — по умолчанию", PriorityLogic.Style(), PriorityLogic.styleOf(styles, "Папа"))
+
+    println("== Приоритетные контакты: обработка черновика ==")
+    check("убираем «напиши ей, что»", "Я скоро буду",
+        PriorityLogic.polish("напиши ей, что я скоро буду", PriorityLogic.Style()))
+    check("убираем «ответь что»", "Задержусь на полчаса",
+        PriorityLogic.polish("ответь что задержусь на полчаса", PriorityLogic.Style()))
+    check("обычный ответ не трогаем", "Скоро буду", PriorityLogic.polish("скоро буду", PriorityLogic.Style()))
+    check("лишние пробелы", "Скоро буду", PriorityLogic.polish("скоро     буду", PriorityLogic.Style()))
+    check("пробел перед запятой", "Да, мам, скоро",
+        PriorityLogic.polish("да, мам , скоро", PriorityLogic.Style()))
+    check("много восклицательных", "Привет!", PriorityLogic.polish("привет!!!", PriorityLogic.Style()))
+    check("«да» → «Да»", "Да", PriorityLogic.polish("да", PriorityLogic.Style()))
+    check("«ок» → «Хорошо»", "Хорошо", PriorityLogic.polish("ок", PriorityLogic.Style()))
+    check("«да» в вежливом стиле", "Да, конечно.",
+        PriorityLogic.polish("да", PriorityLogic.Style(formal = true)))
+    check("строчные в чатовском стиле", "да",
+        PriorityLogic.polish("да", PriorityLogic.Style(noCaps = true)))
+    check("точка в конце по стилю", "Скоро буду.",
+        PriorityLogic.polish("скоро буду", PriorityLogic.Style(endPunct = true)))
+    check("опечатка «спс»", "Спасибо", PriorityLogic.polish("спс", PriorityLogic.Style()))
+    check("опечатка «щяс»", "Сейчас буду", PriorityLogic.polish("щяс буду", PriorityLogic.Style()))
+    check("пустой ответ", "", PriorityLogic.polish("   ", PriorityLogic.Style()))
+    check("эмодзи сохраняем", true, PriorityLogic.polish("скоро буду 😊", PriorityLogic.Style()).contains("😊"))
+
+    println("== Приоритетные контакты: режим шаблонов и напоминания ==")
+    val planOff = PriorityLogic.autoPlan("Ты покушал?", "еда = Да, мам", "", "", enabled = false)
+    check("режим выключен — черновика нет", null, planOff.draft)
+    check("режим выключен — подтверждение нужно", true, planOff.needConfirm)
+    val planNew = PriorityLogic.autoPlan("Ты покушал?", "еда = Да, мам", "", "", enabled = true)
+    check("шаблон подставлен", "Да, мам", planNew.draft)
+    check("первый раз в категории — спрашиваем", true, planNew.needConfirm)
+    val planOk = PriorityLogic.autoPlan("Ты покушал?", "еда = Да, мам", "", "еда,где", enabled = true)
+    check("категория подтверждена — можно без вопроса", false, planOk.needConfirm)
+    check("шаблона на тему нет — черновика нет", null,
+        PriorityLogic.autoPlan("Как дела?", "еда = Да, мам", "", "еда", enabled = true).draft)
+    check("обучение подставляет частый ответ", "Да, поел",
+        PriorityLogic.autoPlan("Ты покушал?", "", "еда|2|Да, поел", "", enabled = true).draft)
+    check("один прежний ответ — ещё спрашиваем", null,
+        PriorityLogic.autoPlan("Ты покушал?", "", "еда|1|Да, поел", "", enabled = true).draft)
+    check("подтверждение категории", true, PriorityLogic.isApproved("еда,где", PriorityLogic.Category.FOOD))
+    check("неподтверждённая категория", false, PriorityLogic.isApproved("где", PriorityLogic.Category.FOOD))
+    check("напоминание пора", true, PriorityLogic.shouldRemind(0, 700_000, 600_000, false, true))
+    check("напоминание уже было", false, PriorityLogic.shouldRemind(0, 700_000, 600_000, true, true))
+    check("напоминания выключены", false, PriorityLogic.shouldRemind(0, 700_000, 600_000, false, false))
+    check("напоминание рано", false, PriorityLogic.shouldRemind(0, 100_000, 600_000, false, true))
+
+    println("== Приоритетные контакты: голосовые команды ==")
+    check("добавление контакта", PriorityLogic.AdminCmd.ADD,
+        PriorityLogic.adminCommand("добавь приоритетный контакт мама"))
+    check("удаление контакта", PriorityLogic.AdminCmd.REMOVE,
+        PriorityLogic.adminCommand("удали приоритетный контакт папа"))
+    check("показ списка", PriorityLogic.AdminCmd.SHOW,
+        PriorityLogic.adminCommand("покажи приоритетные контакты"))
+    check("включение", PriorityLogic.AdminCmd.ON,
+        PriorityLogic.adminCommand("включи приоритетные контакты"))
+    check("выключение", PriorityLogic.AdminCmd.OFF,
+        PriorityLogic.adminCommand("выключи приоритетные контакты"))
+    check("статус", PriorityLogic.AdminCmd.STATUS,
+        PriorityLogic.adminCommand("приоритетные контакты включены?"))
+    check("не про приоритеты", null, PriorityLogic.adminCommand("привет, как дела"))
+    check("шаблон презентации — не наш раздел", null,
+        PriorityLogic.adminCommand("сделай шаблон презентации"))
+    check("шаблон записать", PriorityLogic.AdminCmd.TEMPLATE_SET,
+        PriorityLogic.adminCommand("шаблон: еда = Да, мам, поел"))
+    check("шаблоны показать", PriorityLogic.AdminCmd.TEMPLATE_SHOW,
+        PriorityLogic.adminCommand("покажи шаблоны ответов"))
+    check("шаблоны очистить", PriorityLogic.AdminCmd.TEMPLATE_CLEAR,
+        PriorityLogic.adminCommand("очисти шаблоны ответов"))
+    check("имя из команды", "мама", PriorityLogic.contactFromCommand("добавь приоритетный контакт мама"))
+    check("имя из команды: два слова", "Мама Лена",
+        PriorityLogic.contactFromCommand("добавь приоритетный контакт Мама Лена"))
+    check("имя из команды удаления", "папа",
+        PriorityLogic.contactFromCommand("удали приоритетный контакт папа"))
+    check("имени в команде нет", null, PriorityLogic.contactFromCommand("добавь приоритетный контакт"))
+    check("шаблон из команды", "еда" to "Да, мам, поел",
+        PriorityLogic.templateFromCommand("шаблон: еда = Да, мам, поел"))
+    check("шаблон из команды «для еды»", "еды" to "скоро буду",
+        PriorityLogic.templateFromCommand("шаблон для еды: скоро буду"))
+    check("не шаблон", null, PriorityLogic.templateFromCommand("привет, как дела"))
+
+    println("== Приоритетные контакты: правки и защита смысла ==")
+    check("«да, только добавь…» → уточнение", "только добавь что задержусь",
+        PriorityLogic.stripLeadingYes("да, только добавь что задержусь"))
+    check("«ок, напиши что приду» → уточнение", "напиши что приду",
+        PriorityLogic.stripLeadingYes("ок, напиши что приду"))
+    check("«давай встретимся в семь» — это текст, не правка", "давай встретимся в семь",
+        PriorityLogic.stripLeadingYes("давай встретимся в семь"))
+    check("одно «да» не обрезаем", "да", PriorityLogic.stripLeadingYes("да"))
+    check("обычный ответ без изменений", "скоро буду", PriorityLogic.stripLeadingYes("скоро буду"))
+    check("«стоп» во время вопроса — пропуск", true, PriorityLogic.isSkip("стоп"))
+    check("«отмена» во время вопроса — пропуск", true, PriorityLogic.isSkip("отмена"))
+    check("команда Джарвису распознана", true, PriorityLogic.isServicePhrase("который час"))
+    check("команда «открой ютуб» распознана", true, PriorityLogic.isServicePhrase("открой ютуб"))
+    check("текст для мамы — не команда", false, PriorityLogic.isServicePhrase("скоро буду, мам"))
+    check("смысл сохранён", true, PriorityLogic.keepsMeaning("Скоро буду, мам.", "скоро буду"))
+    check("модель представилась — отклоняем", false,
+        PriorityLogic.keepsMeaning("Здравствуйте, это Джарвис, ассистент.", "скоро буду"))
+    check("модель раздула ответ — отклоняем", false,
+        PriorityLogic.keepsMeaning(
+            "Да, обязательно, я очень скоро приеду, примерно через некоторое время, " +
+                "как только закончу все свои дела и освобожусь окончательно, хорошо?",
+            "да"
+        ))
+    check("модель добавила число — отклоняем", false,
+        PriorityLogic.keepsMeaning("Буду через 15 минут", "скоро буду"))
+    check("число из реплики владельца — можно", true,
+        PriorityLogic.keepsMeaning("Буду через 15 минут", "через 15 минут буду"))
+
+    println("== Приоритетные контакты: машина состояний диалога ==")
+    val ask = PriorityLogic.Stage.ASK
+    val conf = PriorityLogic.Stage.CONFIRM
+    check("вопрос: «скоро буду» — это ответ", PriorityLogic.ReplyIntent.ANSWER,
+        PriorityLogic.intentOf(ask, "скоро буду", false))
+    check("вопрос: «не отвечай» — пропуск", PriorityLogic.ReplyIntent.SKIP,
+        PriorityLogic.intentOf(ask, "не отвечай", false))
+    check("вопрос: «что там?» — повтор", PriorityLogic.ReplyIntent.REPEAT,
+        PriorityLogic.intentOf(ask, "что там?", false))
+    check("вопрос: «который час» — команда Джарвису", PriorityLogic.ReplyIntent.SERVICE,
+        PriorityLogic.intentOf(ask, "который час", false))
+    check("предложен шаблон: «да» — отправляем", PriorityLogic.ReplyIntent.CONFIRM,
+        PriorityLogic.intentOf(ask, "да", true))
+    check("предложен шаблон: «нет» — отмена", PriorityLogic.ReplyIntent.CANCEL,
+        PriorityLogic.intentOf(ask, "нет", true))
+    check("без шаблона «да» — просто текст ответа", PriorityLogic.ReplyIntent.ANSWER,
+        PriorityLogic.intentOf(ask, "да", false))
+    check("подтверждение: «да» — отправляем", PriorityLogic.ReplyIntent.CONFIRM,
+        PriorityLogic.intentOf(conf, "да", false))
+    check("подтверждение: «отправляй» — отправляем", PriorityLogic.ReplyIntent.CONFIRM,
+        PriorityLogic.intentOf(conf, "отправляй", false))
+    check("подтверждение: «нет» — отмена", PriorityLogic.ReplyIntent.CANCEL,
+        PriorityLogic.intentOf(conf, "нет", false))
+    check("подтверждение: «не надо» — отмена", PriorityLogic.ReplyIntent.CANCEL,
+        PriorityLogic.intentOf(conf, "не надо", false))
+    check("подтверждение: правка — новый ответ", PriorityLogic.ReplyIntent.ANSWER,
+        PriorityLogic.intentOf(conf, "нет, напиши что задержусь", false))
+    check("подтверждение: «пропусти» — отмена", PriorityLogic.ReplyIntent.CANCEL,
+        PriorityLogic.intentOf(conf, "пропусти", false))
+    check("вопрос: «что ответить маме?» — повтор", PriorityLogic.ReplyIntent.REPEAT,
+        PriorityLogic.intentOf(ask, "что ответить маме?", false))
+    check("вопрос: одинокое «нет» — отмена", PriorityLogic.ReplyIntent.CANCEL,
+        PriorityLogic.intentOf(ask, "нет", false))
+    check("вопрос: «нет, я занят» — это текст ответа", PriorityLogic.ReplyIntent.ANSWER,
+        PriorityLogic.intentOf(ask, "нет, я занят", false))
+    check("подтверждение: команда Джарвису", PriorityLogic.ReplyIntent.SERVICE,
+        PriorityLogic.intentOf(conf, "открой ютуб", false))
 
     println("")
     println("пройдено: $passed, провалено: $failed")

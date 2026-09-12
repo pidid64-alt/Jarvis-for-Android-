@@ -2,8 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="kz.jarvis.app"
-    android:versionCode="12"
-    android:versionName="2.6.1">
+    android:versionCode="13"
+    android:versionName="2.7.0">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -113,6 +113,12 @@
 
         <receiver
             android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Кнопки уведомления о сообщении от приоритетного контакта:
+             «Ответить» (с полем ввода), «Отправить», «Не отвечать». -->
+        <receiver
+            android:name=".PriorityReceiver"
             android:exported="false" />
 
         <!-- Автоответчик: читает входящие уведомления мессенджеров и отвечает.

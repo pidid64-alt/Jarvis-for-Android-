@@ -200,7 +200,10 @@ class AutoReplyService : NotificationListenerService() {
         }
         val actionsCount = n.actions?.size ?: 0
 
-        if (!Prefs.autoReply(this)) {
+        // приоритетный контакт? тогда автоответ в этом чате запрещён вовсе:
+        // сообщение покажет владельцу «почта» приоритетных контактов
+        val priority = Prefs.priorityOn(this) && Prefs.isPriority(this, title)
+        if (!priority && !Prefs.autoReply(this)) {
             AutoLog.add(
                 this,
                 "Пропустил «$title» ($appLabel): автоответчик выключен. Скажите «включи автоответ»."
@@ -257,6 +260,17 @@ class AutoReplyService : NotificationListenerService() {
         }
         pruneSeen(now)
         seen[dk] = now
+
+        // приоритетный контакт: Джарвис НЕ отвечает сам — показывает сообщение
+        // владельцу и ждёт, что тот скажет ответить
+        if (priority) {
+            val acts = n.actions?.filter { it.remoteInputs?.isNotEmpty() == true }
+            PriorityInbox.register(
+                this, title, appLabel, text, PriorityInbox.Kind.PRIORITY,
+                if (acts.isNullOrEmpty()) null else acts.toTypedArray()
+            )
+            return
+        }
 
         synchronized(chats) {
             pruneChats(now)
@@ -444,6 +458,17 @@ class AutoReplyService : NotificationListenerService() {
         }
         if (!allowed) {
             AutoLog.add(this, "«${chat.title}»: лимит частоты — пропустил.")
+            return
+        }
+
+        // остальные контакты: если включено — только предлагаем черновик и
+        // ждём подтверждения владельца (сами не отправляем)
+        if (Prefs.priorityOn(this) && Prefs.priorityDraftOthers(this)) {
+            PriorityInbox.register(
+                this, chat.title, chat.appLabel, last, PriorityInbox.Kind.DRAFT,
+                actions, draft = reply, suggested = true
+            )
+            AutoLog.add(this, "«${chat.title}»: черновик показан владельцу, жду подтверждения.")
             return
         }
 

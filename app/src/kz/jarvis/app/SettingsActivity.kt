@@ -64,6 +64,19 @@ class SettingsActivity : Activity() {
     private lateinit var swScreenWatch: Switch
     private lateinit var etAutoRules: EditText
 
+    // --- приоритетные контакты ---
+    private lateinit var swPriority: Switch
+    private lateinit var etPriorityList: EditText
+    private lateinit var tvPriorityStatus: TextView
+    private lateinit var swPriorityDraft: Switch
+    private lateinit var swPriorityVoice: Switch
+    private lateinit var swPriorityRemind: Switch
+    private lateinit var etPriorityRemindMin: EditText
+    private lateinit var swPriorityLearn: Switch
+    private lateinit var swPriorityAuto: Switch
+    private lateinit var etPriorityTemplates: EditText
+    private lateinit var btnPriorityCheck: Button
+
     /** Своя озвучка — чтобы дать послушать голос прямо в настройках. */
     private var tts: TtsController? = null
 
@@ -114,10 +127,22 @@ class SettingsActivity : Activity() {
         swAutoVoice = findViewById(R.id.swAutoVoice)
         swScreenWatch = findViewById(R.id.swScreenWatch)
         etAutoRules = findViewById(R.id.etAutoRules)
+        swPriority = findViewById(R.id.swPriority)
+        etPriorityList = findViewById(R.id.etPriorityList)
+        tvPriorityStatus = findViewById(R.id.tvPriorityStatus)
+        swPriorityDraft = findViewById(R.id.swPriorityDraft)
+        swPriorityVoice = findViewById(R.id.swPriorityVoice)
+        swPriorityRemind = findViewById(R.id.swPriorityRemind)
+        etPriorityRemindMin = findViewById(R.id.etPriorityRemindMin)
+        swPriorityLearn = findViewById(R.id.swPriorityLearn)
+        swPriorityAuto = findViewById(R.id.swPriorityAuto)
+        etPriorityTemplates = findViewById(R.id.etPriorityTemplates)
+        btnPriorityCheck = findViewById(R.id.btnPriorityCheck)
 
         setupVoice()
         setupResearch()
         setupAssistantModes()
+        setupPriority()
         setupExternalActions()
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
@@ -278,6 +303,7 @@ class SettingsActivity : Activity() {
         refreshAutoDesc()
         refreshAutoSendStatus()
         refreshBgStatus()
+        refreshPriorityStatus()
         if (Prefs.wakeOn(this)) WakeWordService.start(this)
     }
 
@@ -402,6 +428,97 @@ class SettingsActivity : Activity() {
         btnAutoLog.setOnClickListener { showAutoLog() }
 
         refreshAutoDesc()
+    }
+
+    // ------------------------------------------- приоритетные контакты
+
+    private fun setupPriority() {
+        swPriority.isChecked = Prefs.priorityOn(this)
+        swPriorityDraft.isChecked = Prefs.priorityDraftOthers(this)
+        swPriorityVoice.isChecked = Prefs.priorityVoice(this)
+        swPriorityRemind.isChecked = Prefs.priorityRemind(this)
+        swPriorityLearn.isChecked = Prefs.priorityLearn(this)
+        swPriorityAuto.isChecked = Prefs.priorityAutoTemplate(this)
+        etPriorityList.setText(Prefs.priorityList(this))
+        etPriorityList.hint = getString(R.string.priority_list_hint)
+        etPriorityTemplates.setText(Prefs.priorityTemplates(this))
+        etPriorityTemplates.hint = getString(R.string.priority_templates_hint)
+        etPriorityRemindMin.setText(Prefs.priorityRemindMin(this).toString())
+        etPriorityRemindMin.hint = getString(R.string.priority_remind_min_title)
+
+        swPriority.setOnCheckedChangeListener { _, checked ->
+            Prefs.setPriorityOn(this, checked)
+            refreshPriorityStatus()
+            Toast.makeText(
+                this,
+                if (checked) {
+                    "Включил, сэр: когда напишет кто-то из списка, я спрошу вас, что ответить."
+                } else {
+                    "Выключил, сэр: входящие сообщения больше не показываю."
+                },
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        swPriorityDraft.setOnCheckedChangeListener { _, checked ->
+            Prefs.setPriorityDraftOthers(this, checked)
+        }
+        swPriorityVoice.setOnCheckedChangeListener { _, checked ->
+            Prefs.setPriorityVoice(this, checked)
+        }
+        swPriorityRemind.setOnCheckedChangeListener { _, checked ->
+            Prefs.setPriorityRemind(this, checked)
+        }
+        swPriorityLearn.setOnCheckedChangeListener { _, checked ->
+            Prefs.setPriorityLearn(this, checked)
+        }
+        swPriorityAuto.setOnCheckedChangeListener { _, checked ->
+            Prefs.setPriorityAutoTemplate(this, checked)
+            if (checked) {
+                Toast.makeText(
+                    this,
+                    "Шаблонный режим, сэр: первую отправку в каждой теме всё равно покажу и спрошу «ок».",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
+        // Полная проверка: чего не хватает, чтобы Джарвис задавал вопрос.
+        btnPriorityCheck.setOnClickListener {
+            val status = PriorityInbox.status(this)
+            tvPriorityStatus.text = getString(R.string.priority_list_desc) + "\n\n" + status
+            Toast.makeText(this, status.replace("\n", " ").take(220), Toast.LENGTH_LONG).show()
+        }
+
+        refreshPriorityStatus()
+    }
+
+    /** Карточка статуса: список, доступ к уведомлениям, провайдер ИИ. */
+    private fun refreshPriorityStatus() {
+        val list = Prefs.priorityContacts(this)
+        tvPriorityStatus.text = buildString {
+            append(getString(R.string.priority_list_desc))
+            append("\n\n")
+            if (list.isEmpty()) append("✖ ").append(getString(R.string.priority_empty))
+            else append("✔ В списке ").append(list.size).append(": ").append(list.joinToString(", "))
+            append("\n")
+            if (AutoReplyService.isGranted(this@SettingsActivity)) {
+                append("✔ доступ к уведомлениям выдан — сообщения вижу")
+            } else {
+                append("✖ нет «доступа к уведомлениям» — сообщения не вижу ")
+                append("(кнопка «Доступ к уведомлениям» выше)")
+            }
+            append("\n")
+            if (Llm.ready(this@SettingsActivity)) {
+                append("✔ провайдер ИИ настроен — оформлю ответ в вашем стиле")
+            } else {
+                append("⚠ провайдера ИИ нет — отправлю вашу формулировку как есть")
+            }
+            append("\n")
+            append(if (Prefs.priorityOn(this@SettingsActivity)) "✔ режим включён" else "✖ режим выключен")
+            if (Prefs.priorityDraftOthers(this@SettingsActivity)) {
+                append("\nДля остальных контактов предлагаю черновик — но отправляю только с вашего «ок».")
+            }
+        }
     }
 
     /** Музыка/видео и отправка в WhatsApp: системные доступы и настройка звонков. */
@@ -572,6 +689,11 @@ class SettingsActivity : Activity() {
     override fun onPause() {
         saveFields()
         Prefs.setAutoReplyRules(this, etAutoRules.text.toString())
+        Prefs.setPriorityList(this, etPriorityList.text.toString())
+        Prefs.setPriorityTemplates(this, etPriorityTemplates.text.toString())
+        etPriorityRemindMin.text.toString().trim().toIntOrNull()?.let {
+            Prefs.setPriorityRemindMin(this, it)
+        }
         super.onPause()
     }
 
