@@ -186,10 +186,11 @@ object Voice {
         val manual = Prefs.voiceName(c)
         val voice = if (manual.isEmpty()) "голос подобран автоматически" else "выбран голос $manual"
         val fx = if (Prefs.voiceFx(c)) ", эффект брони включён" else ""
+        val emo = if (Prefs.emotions(c)) ", эмоции включены" else ", эмоции выключены"
         val others = VoiceProfile.ALL.filter { it.id != p.id }.joinToString(", ") {
             it.name.substringBefore(" —")
         }
-        return "Сейчас включён профиль «${p.name}»: $tone, $voice$fx. " +
-            "Есть ещё: $others. Скажите, например, «голос брони» или «говори ниже»."
+        return "Сейчас включён профиль «${p.name}»: $tone, $voice$fx$emo. " +
+            "Есть ещё: $others. Скажите, например, «голос брони», «говори ниже» или «проверь эмоции»."
     }
 }

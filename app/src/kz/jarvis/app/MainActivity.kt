@@ -274,11 +274,13 @@ class MainActivity : Activity() {
     }
 
     private fun deliver(reply: String, remember: Boolean = true, silent: Boolean = false) {
+        val shown = Emotion.visible(reply)
         if (remember) {
-            Conversation.add(reply, false)
+            Conversation.add(shown, false)
         }
-        addMessage(reply, false)
+        addMessage(shown, false)
         if (!silent && Prefs.ttsOn(this)) {
+            // в TTS уходит исходный текст: метка [радость] задаёт тон и не произносится
             tts.speak(reply) { maybeAutoListen() }
         } else {
             setStatus(getString(R.string.status_idle))

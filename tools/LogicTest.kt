@@ -17,6 +17,7 @@ import kz.jarvis.app.Timezones
 import kz.jarvis.app.Units
 import kz.jarvis.app.ResearchPlan
 import kz.jarvis.app.VoiceProfile
+import kz.jarvis.app.Emotion
 import kz.jarvis.app.WakeWords
 import kz.jarvis.app.WebSearch
 import java.util.Calendar
@@ -232,6 +233,7 @@ fun main() {
     check("системный промпт — про Джарвиса", true, Persona.SYSTEM_PROMPT.contains("Джарвис"))
     check("системный промпт — по-русски", true, Persona.SYSTEM_PROMPT.contains("по-русски"))
     check("промпт запрещает Markdown", true, Persona.SYSTEM_PROMPT.contains("Markdown"))
+    check("промпт просит метку эмоции", true, Persona.SYSTEM_PROMPT.contains("[радость]"))
 
     println("== Запросы к модели ==")
     check("экранирование кавычки", "\"он сказал \\\"привет\\\"\"", LlmRequests.json("он сказал \"привет\""))
@@ -335,6 +337,70 @@ fun main() {
     check("настройки голоса", "настройки", voiceCmd("смени голос"))
     check("не про голос", "нет", voiceCmd("включи фонарик"))
     check("громче — это громкость, не голос", "нет", voiceCmd("сделай громче"))
+
+    println("== Эмоции ==")
+    check("стилей девять", 9, Emotion.STYLES.size)
+    check("радость выше спокойного", true,
+        Emotion.style(Emotion.Kind.HAPPY).pitchMul > Emotion.style(Emotion.Kind.CALM).pitchMul)
+    check("грусть ниже спокойного", true,
+        Emotion.style(Emotion.Kind.SAD).pitchMul < Emotion.style(Emotion.Kind.CALM).pitchMul)
+    check("срочно быстрее спокойного", true,
+        Emotion.style(Emotion.Kind.URGENT).rateMul > Emotion.style(Emotion.Kind.CALM).rateMul)
+    check("parseKind радость", Emotion.Kind.HAPPY, Emotion.parseKind("радость"))
+    check("parseKind с иронией", Emotion.Kind.AMUSED, Emotion.parseKind("с иронией"))
+    check("parseKind emotion: sad", Emotion.Kind.SAD, Emotion.parseKind("emotion: sad"))
+    check("parseKind неизвестно", null, Emotion.parseKind("ниже"))
+    check("видимый текст без метки", "Привет, сэр.", Emotion.visible("[радость] Привет, сэр."))
+    check("видимый текст без метки в тексте", "Системы в норме.",
+        Emotion.visible("Системы в норме."))
+    check("английская метка снимается", "Hello.", Emotion.visible("[happy] Hello."))
+    check("эмоция: грусть", "Не вышло.", Emotion.visible("[эмоция: грусть] Не вышло."))
+
+    val tagged = Emotion.chunks("[радость] Отличные новости. [грусть] К сожалению, нет.", true)
+    check("два куска по меткам", 2, tagged.size)
+    check("первый кусок — радость", Emotion.Kind.HAPPY, tagged[0].kind)
+    check("второй кусок — грусть", Emotion.Kind.SAD, tagged[1].kind)
+    check("метка не произносится", "Отличные новости.", tagged[0].spoken)
+    val off = Emotion.chunks("[радость] Ура!", false)
+    check("выключено — спокойно", Emotion.Kind.CALM, off.single().kind)
+    check("выключено — текст без метки", "Ура!", off.single().spoken)
+
+    check("эвристика: к сожалению", Emotion.Kind.SAD, Emotion.detect("К сожалению, сэр, на этот раз не вышло."))
+    check("эвристика: не смог", Emotion.Kind.APOLOGY, Emotion.detect("Не смог открыть окно из фона."))
+    check("эвристика: отличные новости", Emotion.Kind.HAPPY, Emotion.detect("Отличные новости, сэр!"))
+    check("эвристика: срочно", Emotion.Kind.URGENT, Emotion.detect("Сэр, это срочно. Нужно действовать сейчас."))
+    check("эвристика: системы в норме", Emotion.Kind.PROUD, Emotion.detect("Системы в норме, сэр. Готов к работе."))
+    check("эвристика: фонарик — спокойно", Emotion.Kind.CALM, Emotion.detect("Фонарик включён."))
+    check("эвристика: одно восклицание не красит", Emotion.Kind.CALM, Emotion.detect("Слушаю, сэр!"))
+
+    val happyTone = Emotion.applyTone(0.80f, 1.02f, Emotion.Kind.HAPPY)
+    val sadTone = Emotion.applyTone(0.80f, 1.02f, Emotion.Kind.SAD)
+    check("радость поднимает тон", true, happyTone.first > 0.80f)
+    check("грусть опускает тон", true, sadTone.first < 0.80f)
+    check("тон не вылезает за минимум", VoiceProfile.PITCH_MIN,
+        Emotion.applyTone(0.50f, 1.0f, Emotion.Kind.SAD).first)
+
+    fun emoCmd(s: String): String = when (val c = Emotion.parse(s)) {
+        null -> "нет"
+        is Emotion.Cmd.Set -> if (c.on) "вкл" else "выкл"
+        Emotion.Cmd.Status -> "статус"
+        Emotion.Cmd.Demo -> "демо"
+        is Emotion.Cmd.Force -> "сила:${Emotion.style(c.kind).id}"
+    }
+    check("включи эмоции", "вкл", emoCmd("включи эмоции"))
+    check("говори с эмоциями", "вкл", emoCmd("говори с эмоциями"))
+    check("выключи эмоции", "выкл", emoCmd("выключи эмоции"))
+    check("без эмоций", "выкл", emoCmd("без эмоций"))
+    check("эмоции включены?", "статус", emoCmd("эмоции включены?"))
+    check("проверь эмоции", "демо", emoCmd("проверь эмоции"))
+    check("говори радостно", "сила:happy", emoCmd("говори радостно"))
+    check("скажи с иронией", "сила:amused", emoCmd("скажи с иронией"))
+    check("говори ниже — не эмоция", "нет", emoCmd("говори ниже"))
+    check("говори быстрее — не эмоция", "нет", emoCmd("говори быстрее"))
+    check("включи фонарик — не эмоция", "нет", emoCmd("включи фонарик"))
+    check("демо содержит все метки", true,
+        Emotion.demoText().contains("[радость]") && Emotion.demoText().contains("[извинение]"))
+    check("демо раскладывается на 9 кусков", 9, Emotion.chunks(Emotion.demoText(), true).size)
 
     // ============================================== поиск, Клод и презентации
     println("== Поиск и презентации ==")

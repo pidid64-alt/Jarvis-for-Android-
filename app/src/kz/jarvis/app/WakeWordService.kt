@@ -658,7 +658,7 @@ class WakeWordService : Service() {
             return
         }
         speaking = true
-        overlay?.update(text)
+        overlay?.update(Emotion.visible(text))
         t.speak(text) {
             speaking = false
             ui.postDelayed({ onDone() }, 200)

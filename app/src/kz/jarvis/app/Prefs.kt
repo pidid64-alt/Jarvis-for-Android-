@@ -33,6 +33,7 @@ object Prefs {
     private const val K_RATE = "voice_rate"
     private const val K_VOICE_NAME = "voice_name"
     private const val K_VOICE_FX = "voice_fx"
+    private const val K_EMOTION = "voice_emotion"
 
     // исследования и презентации
     private const val K_CLAUDE_APP = "claude_app"
@@ -211,6 +212,13 @@ object Prefs {
     /** Эффект «брони»: лёгкое эхо поверх речи. */
     fun voiceFx(c: Context): Boolean = sp(c).getBoolean(K_VOICE_FX, false)
     fun setVoiceFx(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_VOICE_FX, v).apply()
+
+    /**
+     * Эмоциональная озвучка: тон и темп чуть меняются под ответ.
+     * По умолчанию включена — Джарвис звучит живее, оставаясь дворецким.
+     */
+    fun emotions(c: Context): Boolean = sp(c).getBoolean(K_EMOTION, true)
+    fun setEmotions(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_EMOTION, v).apply()
 
     // ------------------------------------------------- исследования и презентации
 

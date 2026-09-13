@@ -44,6 +44,7 @@ class SettingsActivity : Activity() {
     private lateinit var tvRate: TextView
     private lateinit var sbRate: SeekBar
     private lateinit var swVoiceFx: Switch
+    private lateinit var swEmotion: Switch
     private lateinit var swClaudeApp: Switch
     private lateinit var tvClaudeDesc: TextView
 
@@ -97,6 +98,7 @@ class SettingsActivity : Activity() {
         tvRate = findViewById(R.id.tvRate)
         sbRate = findViewById(R.id.sbRate)
         swVoiceFx = findViewById(R.id.swVoiceFx)
+        swEmotion = findViewById(R.id.swEmotion)
         swClaudeApp = findViewById(R.id.swClaudeApp)
         tvClaudeDesc = findViewById(R.id.tvClaudeDesc)
         swDialog = findViewById(R.id.swDialog)
@@ -644,9 +646,33 @@ class SettingsActivity : Activity() {
             }
         }
 
+        swEmotion.isChecked = Prefs.emotions(this)
+        swEmotion.setOnCheckedChangeListener { _, checked ->
+            Prefs.setEmotions(this, checked)
+            val msg = if (checked) {
+                "Эмоции включены — тон чуть живёт вместе с ответом"
+            } else {
+                "Эмоции выключены — говорю ровно"
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+
         findViewById<Button>(R.id.btnVoiceTest).setOnClickListener {
             tts?.refresh()
             speakSample()
+        }
+
+        findViewById<Button>(R.id.btnEmotionTest).setOnClickListener {
+            if (!Prefs.ttsOn(this)) {
+                Toast.makeText(this, "Озвучка выключена — включите «Голосовые ответы»", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (!Prefs.emotions(this)) {
+                Prefs.setEmotions(this, true)
+                swEmotion.isChecked = true
+            }
+            tts?.refresh()
+            tts?.speak(Emotion.demoText())
         }
 
         // движок TTS поднимается не мгновенно — список голосов заполняем по готовности

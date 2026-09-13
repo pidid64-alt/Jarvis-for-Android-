@@ -40,6 +40,24 @@ object Speaker {
                 t.language = Locale("ru", "RU")
                 // тот же тембр, что и в диалоге: профиль «Джарвис» и его настройки
                 try { Voice.apply(ctx.applicationContext, t) } catch (e: Exception) { }
+                val piece = Emotion.chunks(text, Prefs.emotions(ctx.applicationContext))
+                    .firstOrNull { it.spoken.isNotBlank() }
+                val spoken = (piece?.spoken ?: Emotion.visible(text)).take(600)
+                if (spoken.isBlank()) {
+                    done(t)
+                    return@TextToSpeech
+                }
+                if (piece != null) {
+                    val tone = Emotion.applyTone(
+                        Prefs.voicePitch(ctx.applicationContext),
+                        Prefs.voiceRate(ctx.applicationContext),
+                        piece.kind
+                    )
+                    try {
+                        t.setPitch(tone.first)
+                        t.setSpeechRate(tone.second)
+                    } catch (e: Exception) { }
+                }
                 t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) = SpeechState.begin()
 
@@ -50,7 +68,7 @@ object Speaker {
 
                     override fun onStop(utteranceId: String?, interrupted: Boolean) = done(t)
                 })
-                t.speak(text.take(600), TextToSpeech.QUEUE_FLUSH, null, "jarvis_once")
+                t.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "jarvis_once")
             }
         } catch (e: Exception) {
             done(instance)

@@ -81,7 +81,10 @@
     <string name="voice_rate">Скорость речи: %1$s</string>
     <string name="voice_fx">Эффект брони (эхо)</string>
     <string name="voice_fx_desc">Добавляет лёгкое эхо, как в шлеме. Работает не на всех прошивках и влияет на весь звук телефона — включайте, если нравится.</string>
+    <string name="voice_emotion">Говорить с эмоциями</string>
+    <string name="voice_emotion_desc">Тон и темп чуть живут вместе с ответом: радость, ирония, тревога, грусть, восторг, срочность, гордость, извинение. Джарвис остаётся дворецким, а не мультфильмом. Голосом: «включи эмоции», «проверь эмоции», «говори радостно».</string>
     <string name="voice_test">Послушать голос</string>
+    <string name="voice_emotion_test">Послушать эмоции</string>
     <string name="research_title">Поиск и презентации</string>
     <string name="research_desc">Скажите «поищи инфу про … и сделай презентацию»: Джарвис ищет в интернете (Википедия и DuckDuckGo, без ключей), отдаёт находки Клоду и сохраняет слайды в «Загрузки/Jarvis» файлами .html и .md.</string>
     <string name="claude_app">Работать через приложение Claude</string>

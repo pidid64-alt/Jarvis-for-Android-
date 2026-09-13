@@ -1,6 +1,8 @@
 package kz.jarvis.app
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
@@ -8,6 +10,10 @@ import java.util.Locale
 /**
  * Озвучка ответов. Тембр берётся из [Voice]: профиль «Джарвис» (низкий тон),
  * «Броня», «Агент», «Пятница» или системный голос без обработки.
+ *
+ * Поверх профиля [Emotion] чуть двигает высоту тона и скорость — радость,
+ * тревога, ирония и остальные. Метка `[радость]` в тексте модели снимается
+ * и не произносится.
  *
  * Если настройки голоса поменялись (голосовой командой или в настройках),
  * [Voice.revision] увеличивается — и следующая фраза звучит уже по-новому,
@@ -26,8 +32,17 @@ class TtsController(
     }
 
     private val ctx = context.applicationContext
+    private val ui = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
     private var appliedRevision = -1
+
+    /**
+     * Поколение озвучки: новый [speak]/[stop] отменяет цепочку эмоций
+     * (несколько кусков «проверь эмоции»), чтобы колбэки не наслаивались.
+     */
+    private var speakGen = 0
+    /** Какое поколение уже закрыли — движок иногда шлёт и onDone, и onStop. */
+    private var finishedGen = -1
 
     var ready = false
         private set
@@ -60,30 +75,61 @@ class TtsController(
     fun systemVoices(): List<Pair<String, String>> = Voice.list(tts)
 
     fun speak(text: String, onDone: () -> Unit = {}) {
-        val t = text.take(1200)
-        if (!ready || !enabled || t.isBlank()) {
+        val raw = text.take(2000)
+        if (!ready || !enabled || raw.isBlank()) {
             onDone()
             return
         }
         if (appliedRevision != Voice.revision) refresh()
-        val id = "jarvis_${System.currentTimeMillis()}"
+        val pieces = Emotion.chunks(raw, Prefs.emotions(ctx))
+            .map { it.copy(spoken = it.spoken.take(1200)) }
+            .filter { it.spoken.isNotBlank() }
+        if (pieces.isEmpty()) {
+            onDone()
+            return
+        }
+        val gen = ++speakGen
+        speakPiece(pieces, 0, gen, onDone)
+    }
+
+    private fun speakPiece(
+        pieces: List<Emotion.Utterance>,
+        index: Int,
+        gen: Int,
+        onDone: () -> Unit
+    ) {
+        if (gen != speakGen) return
+        if (index >= pieces.size) {
+            finish(gen, onDone)
+            return
+        }
+        val u = pieces[index]
+        applyEmotion(u)
+        val last = index == pieces.size - 1
+        val id = "jarvis_${gen}_$index"
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
-                SpeechState.begin()
-                onState(STATE_SPEAKING)
+                if (index == 0) {
+                    SpeechState.begin()
+                    onState(STATE_SPEAKING)
+                }
             }
 
             override fun onDone(utteranceId: String?) {
-                SpeechState.end()
-                onState(STATE_IDLE)
-                onDone()
+                if (gen != speakGen) return
+                if (last) {
+                    finish(gen, onDone)
+                } else {
+                    ui.postDelayed({
+                        if (gen == speakGen) speakPiece(pieces, index + 1, gen, onDone)
+                    }, u.pauseMs.toLong())
+                }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                SpeechState.end()
-                onState(STATE_IDLE)
-                onDone()
+                if (gen != speakGen) return
+                finish(gen, onDone)
             }
 
             /**
@@ -92,21 +138,48 @@ class TtsController(
              * не возвращалась в «слушаю», а служба не отпускала микрофон.
              */
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                SpeechState.end()
-                onState(STATE_IDLE)
-                onDone()
+                if (gen != speakGen) return
+                finish(gen, onDone)
             }
         })
-        tts?.speak(t, TextToSpeech.QUEUE_FLUSH, null, id)
+        tts?.speak(u.spoken, TextToSpeech.QUEUE_FLUSH, null, id)
+    }
+
+    private fun applyEmotion(u: Emotion.Utterance) {
+        val tone = Emotion.applyTone(Prefs.voicePitch(ctx), Prefs.voiceRate(ctx), u.kind)
+        try {
+            tts?.setPitch(tone.first)
+            tts?.setSpeechRate(tone.second)
+        } catch (e: Exception) { }
+    }
+
+    private fun restoreTone() {
+        try {
+            tts?.setPitch(VoiceProfile.clampPitch(Prefs.voicePitch(ctx)))
+            tts?.setSpeechRate(VoiceProfile.clampRate(Prefs.voiceRate(ctx)))
+        } catch (e: Exception) { }
+    }
+
+    private fun finish(gen: Int, onDone: () -> Unit) {
+        if (finishedGen == gen) return
+        finishedGen = gen
+        restoreTone()
+        SpeechState.end()
+        onState(STATE_IDLE)
+        onDone()
     }
 
     fun stop() {
+        speakGen++
+        restoreTone()
         SpeechState.end()
         tts?.stop()
         onState(STATE_IDLE)
     }
 
     fun shutdown() {
+        speakGen++
+        restoreTone()
         SpeechState.end()
         tts?.stop()
         tts?.shutdown()

@@ -158,6 +158,9 @@ fun main() {
     check("тема «презентации» в справке", true,
         CommandEngine.help("research")?.contains("поищи инфу про"))
     check("тема «голос» в справке", true, CommandEngine.help("voice")?.contains("голос брони"))
+    check("тема «голос» знает про эмоции", true, CommandEngine.help("voice")?.contains("включи эмоции"))
+    check("общая справка знает про эмоции", true,
+        reply("что ты умеешь")?.contains("проверь эмоции"))
     check("общая справка знает про презентации", true,
         reply("что ты умеешь")?.contains("сделай презентацию"))
 
