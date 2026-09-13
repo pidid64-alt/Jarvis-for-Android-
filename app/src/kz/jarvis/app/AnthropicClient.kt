@@ -61,7 +61,7 @@ object AnthropicClient {
         model: String,
         history: List<Pair<Boolean, String>>,
         text: String,
-        system: String = Persona.SYSTEM_PROMPT,
+        system: String = Persona.live(),
         maxTokens: Int = 600
     ): String {
         val conn = URL(LlmRequests.anthropicUrl(baseUrl)).openConnection() as HttpURLConnection

@@ -9,13 +9,14 @@ import android.os.PowerManager
 /**
  * Сервис специальных возможностей «Джарвис — автоотправка».
  *
- * Нужен, чтобы сообщение в WhatsApp уходило само: Android не даёт обычным
- * приложениям нажимать кнопки в чужих окнах, поэтому мы слушаем окна
- * WhatsApp (только когда сами начали отправку — см. AutoSend.arm) и жмём
- * кнопку «Отправить» за пользователя.
+ * Android не даёт обычному приложению жать кнопки в чужих окнах. Этот сервис:
+ *  1. жмёт «Отправить» в WhatsApp, когда сам Джарвис начал отправку
+ *     (см. AutoSend.arm);
+ *  2. выполняет системные жесты «Назад» / «Домой» / недавние — команда
+ *     «закрой это» (см. Hands).
  *
  * Включается один раз: Настройки → Спец. возможности → «Джарвис —
- * автоотправка». Слушает ТОЛЬКО WhatsApp, ничего не делает вне наших задач.
+ * автоотправка».
  */
 class AutoSendService : AccessibilityService() {
     private var lastScreenReview = 0L
@@ -34,6 +35,21 @@ class AutoSendService : AccessibilityService() {
         } catch (e: Throwable) {
             // не роняем процесс из-за одного странного окна или ответа сети
         }
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        Hands.bind(this)
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        Hands.unbind(this)
+        return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        Hands.unbind(this)
+        super.onDestroy()
     }
 
     override fun onInterrupt() {}

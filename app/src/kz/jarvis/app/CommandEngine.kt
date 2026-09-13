@@ -104,14 +104,21 @@ object CommandEngine {
         // ---------- эмоциональная озвучка ----------
         emotion(ctx, s)?.let { return it }
 
+        // ---------- окна: «закрой это», «назад», «сверни» ----------
+        window(ctx, s)?.let { return it }
+
+        // ---------- «что такое X»: тихо уточнить, не объявляя поиск ----------
+        know(ctx, s)?.let { return it }
+
         // ---------- изучение темы: сначала уточняем формат ----------
         study(ctx, s)?.let { return it }
 
         // ---------- поиск в интернете, Клод и презентации ----------
         research(ctx, s)?.let { return it }
 
-        // ---------- напоминания / будильники / таймеры ----------
+        // ---------- напоминания / будильники / таймеры / секундомер ----------
         reminder(ctx, s)?.let { return it }
+        stopwatch(ctx, s)?.let { return it }
         alarmOrTimer(ctx, s)?.let { return it }
 
         // ---------- бытовые расчёты (до арифметики: там свои глаголы) ----------
@@ -286,7 +293,7 @@ object CommandEngine {
                 "Принято, сэр. Ищу материал по теме «${plan.topic}», отдаю Клоду и собираю " +
                     "${plan.slides} слайдов. Это займёт около минуты."
             ResearchPlan.Kind.RESEARCH ->
-                "Ищу в интернете: «${plan.topic}», сэр. Минуту."
+                "" // тихо: статус «Думаю…», без «сейчас поищу»
             ResearchPlan.Kind.CLAUDE ->
                 if (plan.topic.isBlank()) "Открываю Клод, сэр." else "Передаю Клоду, сэр."
             else -> "Работаю, сэр."
@@ -328,12 +335,12 @@ object CommandEngine {
             • «пауза», «следующий трек», «перемотай вперёд», «включи музыку <название>»
             • «открой ютуб/телеграм/камеру/настройки…», «установи приложение шахматы», «удали приложение …»
             • «позвони маме», «напиши папе что задержусь», «отправь письмо на …», «кто звонил последним»
-            • «будильник на 7:30», «таймер на 5 минут», «напомни через 20 минут выключить духовку»
+            • «будильник на 7:30», «таймер на 5 минут», «напомни через пять минут», «запусти секундомер»
             • «добавь в список покупок молоко», «что в списке покупок», «запиши заметку …»
             • «сколько будет 12 умножить на 7», «20 процентов от 150», «корень из 144»
             • «5 км в милях», «100 фаренгейта в цельсиях», «2 гб в мб», «чаевые 10 процентов от 3500»
             • «курс доллара», «100 долларов в тенге», «какая погода», «погода в Сочи»
-            • «сколько дней до 31 декабря», «какой день недели 1 января 2030», «который час», «время в Лондоне»
+            • «который час», «время на телефоне», «сколько дней до 31 декабря», «время в Лондоне»
             • «сколько заряда», «сколько памяти», «какой у меня ip», «какой оператор», «разрешение экрана»
             • «включи/выключи шумоподавление», «шумоподавление включено?»
             • «маршрут до дома», «найди пиццу», «переведи hello», «новости», «википедия физика»
@@ -343,6 +350,7 @@ object CommandEngine {
             • «спроси у Клода как настроить роутер», «отправь это в Клод», «открой презентацию»
             • «голос Джарвиса», «голос брони», «женский голос», «говори ниже», «проверь голос»
             • «включи эмоции», «выключи эмоции», «проверь эмоции», «говори радостно»
+            • «закрой это», «назад», «сверни», «недавние приложения»
             • «какой у тебя провайдер», «смени провайдера», «настройки Джарвиса»
             • «включи непрерывный диалог» — говорить подряд, без повторного «Джарвис»
             • «включи автоответ» — сам отвечу в WhatsApp/Telegram; «добавь правило: никогда не отвечай маме»
@@ -404,6 +412,65 @@ object CommandEngine {
         • «удали заметку подарок», «очисти заметки»
     """.trimIndent()
 
+    /**
+     * «закрой это», «назад», «сверни», «недавние приложения».
+     * Жесты идут через сервис спец. возможностей — без него Android не даёт
+     * закрывать чужие окна, поэтому раньше была тишина.
+     */
+    private fun window(ctx: Context, s: String): Outcome? {
+        val kind = WindowCmd.parse(s) ?: return null
+        val enabled = try {
+            Hands.enabled(ctx)
+        } catch (_: Throwable) {
+            false
+        }
+        val connected = try {
+            Hands.connected()
+        } catch (_: Throwable) {
+            false
+        }
+        if (!enabled && !connected) {
+            val settings = try {
+                AutoSend.openSettings(ctx)
+            } catch (_: Throwable) {
+                null
+            }
+            return Outcome(
+                "Чтобы закрывать окна, включите «Джарвис — автоотправка» в специальных возможностях, сэр.",
+                settings
+            )
+        }
+        val ok = try {
+            Hands.act(kind)
+        } catch (_: Throwable) {
+            false
+        }
+        if (!ok) {
+            val settings = try {
+                AutoSend.openSettings(ctx)
+            } catch (_: Throwable) {
+                null
+            }
+            return Outcome(
+                if (enabled) "Сервис ещё подключается, сэр. Повторите «закрой это» через секунду."
+                else "Не смог закрыть окно, сэр. Включите «Джарвис — автоотправка» в спец. возможностях.",
+                settings
+            )
+        }
+        return Outcome(WindowCmd.reply(kind))
+    }
+
+    /**
+     * «Что такое X», «кто такой Y» — сам уточняет и отвечает, не говоря,
+     * что ищет.
+     */
+    private fun know(ctx: Context, s: String): Outcome? {
+        val q = Know.directQuery(s) ?: return null
+        return Outcome(
+            reply = "",
+            async = { c, done -> done(Research.silent(c, q)) }
+        )
+    }
 
     // =========================================================== разделы
 
@@ -719,50 +786,90 @@ object CommandEngine {
 
     private fun reminder(ctx: Context, s: String): Outcome? {
         if (Regex("список напоминаний|какие напоминания|покажи напоминания").containsMatchIn(s)) {
-            return Outcome(ReminderScheduler.list(ctx))
+            return Outcome(ReminderScheduler.list(ctx, ReminderScheduler.KIND_REMINDER))
         }
         if (Regex("отмени (все )?напоминания|удали (все )?напоминания|сними напоминания").containsMatchIn(s)) {
-            val n = ReminderScheduler.cancelAll(ctx)
+            val n = ReminderScheduler.cancelAll(ctx, ReminderScheduler.KIND_REMINDER)
             return Outcome(if (n > 0) "Отменил напоминаний: $n, сэр." else "Напоминаний нет, сэр.")
         }
 
-        // «напомни через 20 минут выключить духовку»
-        Regex("(?:напомни|напомнить|напоминание)(?:\\s+мне)?\\s+через\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?\\s*(.*)")
-            .find(s)?.let { m ->
-                val n = m.groupValues[1].toIntOrNull() ?: return@let
-                val mult: Double = when {
-                    m.groupValues[2].startsWith("час") -> 60.0
-                    m.groupValues[2].startsWith("секунд") -> 1.0 / 60.0
-                    else -> 1.0
-                }
-                val minutes = (n * mult).roundToInt().coerceAtLeast(1)
-                val text = m.groupValues[3].trim()
-                if (text.isBlank()) return null // без текста — пусть будет обычный таймер
-                return schedule(ctx, System.currentTimeMillis() + minutes * 60_000L, text, "через $minutes мин.")
-            }
-
-        // «напомни в 18:30 позвонить маме»
-        Regex("(?:напомни|напомнить|напоминание)(?:\\s+мне)?\\s+в\\s+(\\d{1,2})[:.\\s](\\d{2})\\s*(.*)")
-            .find(s)?.let { m ->
-                val h = m.groupValues[1].toIntOrNull() ?: return@let
-                val min = m.groupValues[2].toIntOrNull() ?: return@let
-                val text = m.groupValues[3].trim()
-                if (text.isBlank() || h !in 0..23 || min !in 0..59) return null
-                val cal = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, min)
-                    set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-                    if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
-                }
-                return schedule(ctx, cal.timeInMillis, text, "в %02d:%02d".format(h, min))
-            }
-        return null
+        val spec = TimeParse.reminder(s) ?: return null
+        val now = System.currentTimeMillis()
+        val at = when {
+            spec.delayMs != null -> now + spec.delayMs
+            spec.clock != null -> TimeParse.atClock(spec.clock, now)
+            else -> return null
+        }
+        val text = spec.text.ifBlank { "Напоминание" }
+        return schedule(ctx, at, text, spec.human, ReminderScheduler.KIND_REMINDER)
     }
 
-    private fun schedule(ctx: Context, at: Long, text: String, human: String): Outcome {
-        return if (ReminderScheduler.schedule(ctx, at, text)) {
-            Outcome("Записал, сэр: напомню $human — «$text».")
-        } else {
-            Outcome("Не смог поставить напоминание, сэр.")
+    private fun schedule(
+        ctx: Context,
+        at: Long,
+        text: String,
+        human: String,
+        kind: String = ReminderScheduler.KIND_REMINDER
+    ): Outcome {
+        val ok = ReminderScheduler.schedule(ctx, at, text, kind)
+        val timer = kind == ReminderScheduler.KIND_TIMER
+        if (!ok) {
+            return Outcome(if (timer) "Не смог поставить таймер, сэр." else "Не смог поставить напоминание, сэр.")
+        }
+        val reply = if (timer) "Ставлю таймер на $human, сэр."
+        else "Записал, сэр: напомню $human — «$text»."
+        if (Build.VERSION.SDK_INT >= 31 && !ReminderScheduler.exactAllowed(ctx)) {
+            val i = Intent("android.settings.REQUEST_SCHEDULE_EXACT_ALARM")
+                .setData(Uri.parse("package:${ctx.packageName}"))
+                .withTask(ctx)
+            return Outcome(
+                "$reply Чтобы сработало точно, дайте разрешение «Точные будильники».",
+                i
+            )
+        }
+        return Outcome(reply)
+    }
+
+    /** «запусти секундомер», «останови», «сбрось», «сколько на секундомере». */
+    private fun stopwatch(ctx: Context, s: String): Outcome? {
+        val cmd = Stopwatch.parse(s) ?: return null
+        val now = System.currentTimeMillis()
+        val running = Prefs.swRunning(ctx)
+        val started = Prefs.swStartedAt(ctx)
+        val accrued = Prefs.swAccrued(ctx)
+        val elapsed = Stopwatch.elapsed(running, started, accrued, now)
+        return when (cmd) {
+            Stopwatch.Cmd.START -> {
+                if (running) {
+                    Outcome("Секундомер уже идёт, сэр: ${Stopwatch.spoken(elapsed)}.")
+                } else {
+                    Prefs.setStopwatch(ctx, true, now, accrued)
+                    Outcome(
+                        if (accrued > 0) "Продолжаю секундомер, сэр. Уже ${Stopwatch.spoken(accrued)}."
+                        else "Секундомер запущен, сэр."
+                    )
+                }
+            }
+            Stopwatch.Cmd.STOP -> {
+                if (!running && accrued == 0L) {
+                    Outcome("Секундомер не запущен, сэр.")
+                } else {
+                    Prefs.setStopwatch(ctx, false, 0L, elapsed)
+                    Outcome("Секундомер на паузе, сэр: ${Stopwatch.spoken(elapsed)}.")
+                }
+            }
+            Stopwatch.Cmd.RESET -> {
+                Prefs.setStopwatch(ctx, false, 0L, 0L)
+                Outcome("Секундомер сброшен, сэр.")
+            }
+            Stopwatch.Cmd.STATUS -> {
+                val state = when {
+                    running -> "идёт"
+                    elapsed > 0 -> "на паузе"
+                    else -> "не запущен"
+                }
+                Outcome("Секундомер $state, сэр: ${Stopwatch.spoken(elapsed)}.")
+            }
         }
     }
 
@@ -772,17 +879,18 @@ object CommandEngine {
         if (Regex("покажи будильники|открой будильник|мои будильники").containsMatchIn(s)) {
             return Outcome("Открываю будильники.", Intent(AlarmClock.ACTION_SHOW_ALARMS).withTask(ctx))
         }
-        if (Regex("покажи таймеры|мои таймеры").containsMatchIn(s)) {
-            return Outcome("Открываю таймеры.", Intent(AlarmClock.ACTION_SHOW_TIMERS).withTask(ctx))
+        if (Regex("покажи таймеры|мои таймеры|какие таймеры|список таймеров").containsMatchIn(s)) {
+            return Outcome(ReminderScheduler.list(ctx, ReminderScheduler.KIND_TIMER))
+        }
+        if (Regex("отмени (все )?таймеры|удали (все )?таймеры|сними таймеры").containsMatchIn(s)) {
+            val n = ReminderScheduler.cancelAll(ctx, ReminderScheduler.KIND_TIMER)
+            return Outcome(if (n > 0) "Отменил таймеров: $n, сэр." else "Таймеров нет, сэр.")
         }
 
-        // 1) длительность: «таймер на 5 минут», «через 10 минут»
+        // 1) длительность: «таймер на 5 минут», «через 10 минут», «засеки 30 секунд»
         TimeParse.duration(s)?.let { d ->
-            val i = Intent(AlarmClock.ACTION_SET_TIMER)
-                .putExtra(AlarmClock.EXTRA_LENGTH, d.seconds)
-                .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-                .withTask(ctx)
-            return Outcome("Ставлю таймер на ${d.human}.", i)
+            val at = System.currentTimeMillis() + d.seconds * 1000L
+            return schedule(ctx, at, "Таймер", d.human, ReminderScheduler.KIND_TIMER)
         }
 
         // 2) момент дня: «будильник на 7:30», «разбуди меня в 6 вечера»
@@ -797,6 +905,9 @@ object CommandEngine {
 
         if (Regex("^будильник|^разбуди|поставь будильник").containsMatchIn(s)) {
             return Outcome("Не разобрал время. Скажите, например: «будильник на 7:30».")
+        }
+        if (Regex("таймер").containsMatchIn(s)) {
+            return Outcome("Не разобрал длительность. Скажите, например: «таймер на 5 минут».")
         }
         return null
     }
@@ -910,9 +1021,22 @@ object CommandEngine {
                 Outcome("Не знаю часовой пояс «$place», сэр.")
             }
         }
-        if (Regex("который час|сколько времени|сколько сейчас времени|^время$|текущее время|точное время").containsMatchIn(s)) {
+        if (Regex("настройк").containsMatchIn(s)) {
+            // «настройки времени» — системная панель, не часы
+        } else if (Regex(
+                "который(?: сейчас)? час|" +
+                    "сколько(?: сейчас)? времени|" +
+                    "скажи(?: мне)? (?:текущее |точное )?время|" +
+                    "время на (?:этом )?телефон|" +
+                    "(?:текущее|точное) время|" +
+                    "^время$|" +
+                    "какое сейчас время|" +
+                    "что на часах"
+            ).containsMatchIn(s)
+        ) {
             val t = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-            return Outcome("Сейчас $t, сэр.")
+            val d = SimpleDateFormat("d MMMM", Locale("ru")).format(Date())
+            return Outcome("На телефоне сейчас $t, $d, сэр.")
         }
         if (Regex("какое (сегодня )?(число|дата)|какая (сегодня )?дата|какой (сегодня )?день|^дата$").containsMatchIn(s)) {
             val d = SimpleDateFormat("EEEE, d MMMM yyyy", Locale("ru")).format(Date())

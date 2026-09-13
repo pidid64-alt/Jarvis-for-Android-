@@ -2,7 +2,7 @@
 # ============================================================
 #  Быстрые тесты «чистой» логики (без Android-эмулятора).
 #  Компилируются те же самые исходники, что попадают в APK:
-#    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Timezones,
+#    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Stopwatch,Timezones,
 #                           Units,LifeCalc,DateFacts,TextTools,Randoms,
 #                           Persona,Providers,LlmRequests,VoiceProfile,Emotion,
 #                           ResearchPlan,Deck,WebSearch}.kt
@@ -42,7 +42,8 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   -d "$OUT/classes" \
   "$ROOT/app/src/kz/jarvis/app/MathEngine.kt" \
   "$ROOT/app/src/kz/jarvis/app/WakeWords.kt" \
-  "$ROOT/app/src/kz/jarvis/app/TimeParse.kt" \
+    "$ROOT/app/src/kz/jarvis/app/TimeParse.kt" \
+    "$ROOT/app/src/kz/jarvis/app/Stopwatch.kt" \
   "$ROOT/app/src/kz/jarvis/app/Timezones.kt" \
   "$ROOT/app/src/kz/jarvis/app/Units.kt" \
   "$ROOT/app/src/kz/jarvis/app/LifeCalc.kt" \
@@ -54,6 +55,8 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   "$ROOT/app/src/kz/jarvis/app/LlmRequests.kt" \
   "$ROOT/app/src/kz/jarvis/app/VoiceProfile.kt" \
   "$ROOT/app/src/kz/jarvis/app/Emotion.kt" \
+    "$ROOT/app/src/kz/jarvis/app/WindowCmd.kt" \
+    "$ROOT/app/src/kz/jarvis/app/Know.kt" \
     "$ROOT/app/src/kz/jarvis/app/ResearchPlan.kt" \
     "$ROOT/app/src/kz/jarvis/app/Deck.kt" \
     "$ROOT/app/src/kz/jarvis/app/WebSearch.kt" \

@@ -32,6 +32,60 @@ object Research {
         ResearchPlan.Kind.PRESENTATION -> presentation(c, plan)
     }
 
+    /**
+     * Тихий ответ по факту: ищет сам и говорит как будто знает.
+     * Не произносит «ищу», «нашёл», «в интернете».
+     */
+    fun silent(c: Context, topic: String): String {
+        val q = topic.trim()
+        if (q.isBlank()) return "Пока не могу это уточнить, сэр."
+        val hits = try {
+            WebSearch.search(q, 6, ResearchPlan.searchQueries(q).drop(1))
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val worker = try {
+            Llm.worker(c)
+        } catch (_: Throwable) {
+            null
+        }
+        if (hits.isEmpty()) {
+            if (worker == null) return "Пока не могу это уточнить, сэр."
+            return try {
+                val raw = Llm.complete(c, Persona.live(), q, 400, worker)
+                if (failed(raw) || Know.looksUnknown(raw)) "Пока не могу это уточнить, сэр."
+                else raw.take(SPEECH_LIMIT)
+            } catch (_: Throwable) {
+                "Пока не могу это уточнить, сэр."
+            }
+        }
+        if (worker != null) {
+            val digest = WebSearch.digest(q, hits, today())
+            val answer = try {
+                Llm.complete(c, Know.SILENT_SYSTEM, Know.silentPrompt(q, digest), 500, worker)
+            } catch (_: Throwable) {
+                ""
+            }
+            if (answer.isNotBlank() && !failed(answer) && !Know.looksUnknown(answer)) {
+                return answer.take(520)
+            }
+        }
+        return Know.spokenFromHits(hits)
+    }
+
+    /**
+     * После ответа модели: если она не знает или поставила `[поиск]` —
+     * тихо уточняем и подменяем ответ. Иначе возвращаем исходный.
+     */
+    fun afterModel(c: Context, question: String, answer: String): String {
+        val q = Know.followUpQuery(question, answer) ?: return Know.stripMeta(answer)
+        return try {
+            silent(c, q)
+        } catch (_: Throwable) {
+            Know.stripMeta(answer).ifBlank { "Пока не могу это уточнить, сэр." }
+        }
+    }
+
     // --------------------------------------------------------------- сценарии
 
     /** «Спроси у Клода …», «отправь это в Клод». */
@@ -41,7 +95,7 @@ object Research {
         }
         val claude = Llm.claude(c)
         if (claude != null && !Prefs.claudeApp(c)) {
-            val answer = Llm.complete(c, Persona.SYSTEM_PROMPT, plan.topic, 900, claude)
+            val answer = Llm.complete(c, Persona.live(), plan.topic, 900, claude)
             return "Клод отвечает: " + answer.take(SPEECH_LIMIT)
         }
         return ClaudeBridge.send(c, plan.topic)
