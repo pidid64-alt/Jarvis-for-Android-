@@ -5,6 +5,7 @@ import kz.jarvis.app.AutoReplyLogic
 import kz.jarvis.app.ChatMedia
 import kz.jarvis.app.DateFacts
 import kz.jarvis.app.Deck
+import kz.jarvis.app.Emotion
 import kz.jarvis.app.LifeCalc
 import kz.jarvis.app.LlmRequests
 import kz.jarvis.app.Persona
@@ -591,6 +592,103 @@ fun main() {
     check("местный 10 цифр", "77712345678", ChatMedia.phoneForWa("7712345678"))
     check("сломанный номер", null, ChatMedia.phoneForWa("номер не найден"))
     check("пусто", null, ChatMedia.phoneForWa(""))
+
+    println("== Эмоции: настроение ответа ==")
+    check("радость", Emotion.Mood.JOY, Emotion.detect("Готово, сэр! Презентация сохранена."))
+    check("восторг", Emotion.Mood.EXCITED, Emotion.detect("Ура, всё получилось!!"))
+    check("ошибка", Emotion.Mood.ERROR, Emotion.detect("Не получилось, сэр: ошибка сети."))
+    check("предупреждение", Emotion.Mood.WARNING, Emotion.detect("Внимание, заряд почти на нуле."))
+    check("тревога", Emotion.Mood.CONCERN, Emotion.detect("К сожалению, сервер не отвечает."))
+    check("грусть", Emotion.Mood.SAD, Emotion.detect("Увы, жаль."))
+    check("ирония", Emotion.Mood.IRONIC, Emotion.detect("Разумеется, сэр."))
+    check("вопрос", Emotion.Mood.CURIOUS, Emotion.detect("Что прикажете дальше?"))
+    check("тепло", Emotion.Mood.WARM, Emotion.detect("Всегда пожалуйста, сэр."))
+    check("спокойствие", Emotion.Mood.CALM, Emotion.detect("Системы в норме."))
+    check("пусто — спокойствие", Emotion.Mood.CALM, Emotion.detect(""))
+    check("слово-интонация «грустно»", Emotion.Mood.SAD, Emotion.moodByWord("грустно"))
+    check("слово-интонация «с иронией»", Emotion.Mood.IRONIC, Emotion.moodByWord("с иронией"))
+    check("неизвестное слово", null, Emotion.moodByWord("задумчиво"))
+
+    println("== Эмоции: чистка текста для голоса ==")
+    check("markdown и эмодзи убраны", "Готово, сэр",
+        Emotion.cleanForSpeech("**Готово**, сэр \uD83D\uDE80"))
+    check("заголовок и список", "Итоги. Первое. Второе",
+        Emotion.cleanForSpeech("## Итоги\n\n* Первое\n* Второе"))
+    check("ссылка оставляет текст", "открыть документацию",
+        Emotion.cleanForSpeech("открыть [документацию](https://example.com/doc)"))
+    check("пустая строка", "", Emotion.cleanForSpeech("   \n  "))
+
+    println("== Эмоции: план озвучки ==")
+    val offChunks = Emotion.plan("Готово, сэр! Всё получилось!", 0.80f, 1.02f, Emotion.Level.OFF)
+    check("уровень «выключено» — один кусок", 1, offChunks.size)
+    check("в выключенном режиме тон профиля", 0.80f, offChunks[0].pitch)
+    check("в выключенном режиме темп профиля", 1.02f, offChunks[0].rate)
+    check("в выключенном режиме без паузы", 0, offChunks[0].pauseAfterMs)
+    check("весь текст одним куском", "Готово, сэр! Всё получилось!", offChunks[0].text)
+    check("пустой текст — пустой план", 0, Emotion.plan("   ", 0.8f, 1f, Emotion.Level.FULL).size)
+
+    val joy = Emotion.plan("Готово, сэр. Всё получилось.", 0.80f, 1.02f, Emotion.Level.FULL)
+    check("фраза порезана на куски", true, joy.size >= 3)
+    check("между кусками есть пауза", true, joy[0].pauseAfterMs > 0)
+    check("радость: тон выше профиля", true, joy.all { it.pitch > 0.80f })
+    check("радость: темп быстрее", true, joy.all { it.rate > 1.02f })
+    check("куски произносятся по очереди", true, joy.all { it.text.isNotBlank() })
+
+    val light = Emotion.plan("Готово, сэр. Всё получилось.", 0.80f, 1.02f, Emotion.Level.LIGHT)
+    val fullJoy = joy[0].pitch - 0.80f
+    val lightJoy = light[0].pitch - 0.80f
+    check("«слегка» слабее «выразительно»", true, kotlin.math.abs(lightJoy) < kotlin.math.abs(fullJoy))
+    check("«слегка» тоже выше ровного тона", true, lightJoy > 0f)
+
+    val warning = Emotion.plan("Внимание, заряд почти на нуле.", 0.80f, 1.02f, Emotion.Level.FULL)
+    check("предупреждение: темп медленнее", true, warning[0].rate < 1.02f)
+    check("предупреждение: пауза для веса", true, warning[0].pauseAfterMs >= 200)
+
+    val question = Emotion.plan("Что прикажете дальше?", 0.80f, 1.02f, Emotion.Level.FULL)
+    check("вопрос: тон выше", true, question[0].pitch > 0.80f)
+    check("вопрос: темп чуть медленнее", true, question[0].rate < 1.02f)
+
+    val sad = Emotion.plan("Увы, жаль…", 0.80f, 1.02f, Emotion.Level.FULL)
+    check("многоточие: тише", true, sad.last().volume < 1f)
+    check("многоточие: длинная пауза", true, sad.last().pauseAfterMs >= 300)
+
+    val neutral = Emotion.plan("Я закончил проект", 0.80f, 1.02f, Emotion.Level.FULL)
+    val forced = Emotion.plan("Я закончил проект", 0.80f, 1.02f, Emotion.Level.FULL, Emotion.Mood.EXCITED)
+    check("принудительная интонация поднимает тон", true, forced[0].pitch > neutral[0].pitch + 0.1f)
+    val forcedSad = Emotion.plan("Я закончил проект", 0.80f, 1.02f, Emotion.Level.FULL, Emotion.Mood.SAD)
+    check("принудительная грусть опускает тон", true, forcedSad[0].pitch < neutral[0].pitch)
+
+    println("== Эмоции: голосовые команды ==")
+    check("покажи эмоции", Emotion.Cmd.Test, Emotion.parse("покажи эмоции"))
+    check("проверь эмоции", Emotion.Cmd.Test, Emotion.parse("проверь эмоции"))
+    check("выключи эмоции", Emotion.Cmd.Set(Emotion.Level.OFF), Emotion.parse("выключи эмоции"))
+    check("говори ровно", Emotion.Cmd.Set(Emotion.Level.OFF), Emotion.parse("говори ровно"))
+    check("поменьше эмоций", Emotion.Cmd.Set(Emotion.Level.LIGHT), Emotion.parse("поменьше эмоций"))
+    check("говори эмоциональнее", Emotion.Cmd.Set(Emotion.Level.FULL), Emotion.parse("говори эмоциональнее"))
+    check("больше эмоций", Emotion.Cmd.Set(Emotion.Level.FULL), Emotion.parse("больше эмоций"))
+    check("какие эмоции включены", Emotion.Cmd.Info, Emotion.parse("какие эмоции включены"))
+    val say = Emotion.parse("скажи радостно: я закончил проект") as? Emotion.Cmd.Say
+    check("«скажи радостно» — настроение", Emotion.Mood.JOY, say?.mood)
+    check("«скажи радостно» — текст", "я закончил проект", say?.text)
+    val say2 = Emotion.parse("произнеси строго: не трогай мой кофе") as? Emotion.Cmd.Say
+    check("«произнеси строго»", Emotion.Mood.STERN, say2?.mood)
+    check("«произнеси строго» — текст", "не трогай мой кофе", say2?.text)
+    check("команда про голос — не про эмоции", null, Emotion.parse("голос брони"))
+    check("«проверь голос» — не про эмоции", null, Emotion.parse("проверь голос"))
+
+    val demo = Emotion.demoText(Emotion.Level.FULL)
+    check("демо знает восклицание", true, demo.contains("!"))
+    check("демо знает вопрос", true, demo.contains("?"))
+    check("демо знает многоточие", true, demo.contains("…"))
+    val demoChunks = Emotion.plan(demo, 0.80f, 1.02f, Emotion.Level.FULL)
+    check("демо богато на интонации", true, demoChunks.size >= 6)
+    check("демо меняет тон", true,
+        (demoChunks.maxOf { it.pitch } - demoChunks.minOf { it.pitch }) > 0.15f)
+    check("уровень по умолчанию — выразительно", Emotion.Level.FULL, Emotion.Level.DEFAULT)
+    check("уровень по номеру", Emotion.Level.LIGHT, Emotion.Level.byId(1))
+    check("неизвестный номер — по умолчанию", Emotion.Level.DEFAULT, Emotion.Level.byId(9))
+    check("описание знает уровень", true,
+        Emotion.describe(Emotion.Level.OFF).startsWith("Эмоции выключены"))
 
     println("")
     println("пройдено: $passed, провалено: $failed")

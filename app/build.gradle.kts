@@ -11,8 +11,8 @@ android {
         applicationId = "kz.jarvis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "2.4.1"
+        versionCode = 14
+        versionName = "2.8.2"
     }
 
     buildTypes {

@@ -2,12 +2,13 @@ package kz.jarvis.app
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
 /**
  * Озвучка ответов. Тембр берётся из [Voice]: профиль «Джарвис» (низкий тон),
- * «Броня», «Агент», «Пятница» или системный голос без обработки.
+ * «Броня», «Агент», «Пятница» или системный голос без обработки. Интонация —
+ * из [Emotion]: фраза режется на куски, у каждого свой тон, темп, громкость и
+ * пауза, поэтому слышно радость, тревогу, вопрос или иронию, а не ровное чтение.
  *
  * Если настройки голоса поменялись (голосовой командой или в настройках),
  * [Voice.revision] увеличивается — и следующая фраза звучит уже по-новому,
@@ -27,7 +28,11 @@ class TtsController(
 
     private val ctx = context.applicationContext
     private var tts: TextToSpeech? = null
+    private var chain: SpeechChain? = null
     private var appliedRevision = -1
+
+    /** Колбэк владельца текущей фразы: позовём, когда она договорена. */
+    private var pendingDone: (() -> Unit)? = null
 
     var ready = false
         private set
@@ -43,6 +48,22 @@ class TtsController(
                     it != TextToSpeech.LANG_MISSING_DATA && it != TextToSpeech.LANG_NOT_SUPPORTED
                 } == true)
         if (!ready) tts?.language = Locale.US
+        tts?.let { engine ->
+            chain = SpeechChain(engine).apply {
+                onStart = {
+                    SpeechState.begin()
+                    onState(STATE_SPEAKING)
+                }
+                onFinish = {
+                    // держим состояние «говорю» до конца ВСЕЙ фразы, вместе с
+                    // паузами между кусками: иначе микрофон службы успел бы
+                    // услышать собственный голос Джарвиса
+                    SpeechState.end()
+                    onState(STATE_IDLE)
+                    dialogFinished()
+                }
+            }
+        }
         refresh()
         try { onReady() } catch (e: Exception) { }
     }
@@ -59,58 +80,54 @@ class TtsController(
     /** Список системных голосов для экрана настроек. */
     fun systemVoices(): List<Pair<String, String>> = Voice.list(tts)
 
-    fun speak(text: String, onDone: () -> Unit = {}) {
+    /**
+     * Озвучивает ответ: интонация собирается из текста, либо берётся [mood]
+     * (команды «скажи радостно: …»).
+     */
+    fun speak(text: String, mood: Emotion.Mood? = null, onDone: () -> Unit = {}) {
         val t = text.take(1200)
         if (!ready || !enabled || t.isBlank()) {
             onDone()
             return
         }
         if (appliedRevision != Voice.revision) refresh()
-        val id = "jarvis_${System.currentTimeMillis()}"
-        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {
-                SpeechState.begin()
-                onState(STATE_SPEAKING)
-            }
-
-            override fun onDone(utteranceId: String?) {
-                SpeechState.end()
-                onState(STATE_IDLE)
-                onDone()
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                SpeechState.end()
-                onState(STATE_IDLE)
-                onDone()
-            }
-
-            /**
-             * Фразу прервали (QUEUE_FLUSH, «стоп», shutdown). Без этого
-             * колбэка состояние «говорю» залипало навсегда: сфера в окне
-             * не возвращалась в «слушаю», а служба не отпускала микрофон.
-             */
-            override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                SpeechState.end()
-                onState(STATE_IDLE)
-                onDone()
-            }
-        })
-        tts?.speak(t, TextToSpeech.QUEUE_FLUSH, null, id)
+        val plan = Emotion.plan(
+            t,
+            Prefs.voicePitch(ctx),
+            Prefs.voiceRate(ctx),
+            Prefs.expression(ctx),
+            mood
+        )
+        val c = chain
+        if (c == null || plan.isEmpty()) {
+            onDone()
+            return
+        }
+        // speak() завершает прежнюю фразу — её владелец получит свой onDone,
+        // поэтому свой колбэк ставим ПОСЛЕ запуска новой фразы
+        c.speak(plan)
+        pendingDone = onDone
     }
 
+    /** Прервать озвучку (если что-то звучало — владелец получит колбэк). */
     fun stop() {
-        SpeechState.end()
-        tts?.stop()
+        chain?.stop()
         onState(STATE_IDLE)
     }
 
     fun shutdown() {
-        SpeechState.end()
-        tts?.stop()
-        tts?.shutdown()
+        chain?.stop()
+        chain = null
+        try { tts?.stop() } catch (e: Exception) { }
+        try { tts?.shutdown() } catch (e: Exception) { }
         tts = null
         ready = false
+        pendingDone = null
+    }
+
+    private fun dialogFinished() {
+        val d = pendingDone
+        pendingDone = null
+        d?.invoke()
     }
 }

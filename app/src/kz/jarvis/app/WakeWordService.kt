@@ -601,7 +601,7 @@ class WakeWordService : Service() {
             }
             // «стоп»/«хватит» (silent) тоже продолжают слушать — собеседник
             // прервал ответ и хочет сказать следующее
-            say(if (outcome.silent) "" else outcome.reply) { afterReply() }
+            say(if (outcome.silent) "" else outcome.reply, outcome.mood) { afterReply() }
             return
         }
 
@@ -646,7 +646,16 @@ class WakeWordService : Service() {
 
     // ------------------------------------------------------------ речь / окна
 
-    private fun say(text: String, attempt: Int = 0, onDone: () -> Unit = {}) {
+    /**
+     * @param mood интонация из команды «скажи радостно: …»; null — настроение
+     *             определяется по самому тексту ответа ([Emotion])
+     */
+    private fun say(
+        text: String,
+        mood: Emotion.Mood? = null,
+        attempt: Int = 0,
+        onDone: () -> Unit = {}
+    ) {
         if (text.isBlank() || !Prefs.ttsOn(this)) {
             onDone()
             return
@@ -654,12 +663,12 @@ class WakeWordService : Service() {
         val t = tts
         tts?.enabled = Prefs.ttsOn(this)
         if (t == null || !t.ready) {
-            if (attempt < 6) ui.postDelayed({ say(text, attempt + 1, onDone) }, 400) else onDone()
+            if (attempt < 6) ui.postDelayed({ say(text, mood, attempt + 1, onDone) }, 400) else onDone()
             return
         }
         speaking = true
         overlay?.update(text)
-        t.speak(text) {
+        t.speak(text, mood) {
             speaking = false
             ui.postDelayed({ onDone() }, 200)
         }

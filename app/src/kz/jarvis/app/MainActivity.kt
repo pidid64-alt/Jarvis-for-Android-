@@ -253,7 +253,12 @@ class MainActivity : Activity() {
                 }.start()
                 return
             }
-            deliver(outcome.reply, remember = true, silent = outcome.silent || outcome.stopTts)
+            deliver(
+                outcome.reply,
+                remember = true,
+                silent = outcome.silent || outcome.stopTts,
+                mood = outcome.mood
+            )
             return
         }
 
@@ -273,13 +278,20 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun deliver(reply: String, remember: Boolean = true, silent: Boolean = false) {
+    private fun deliver(
+        reply: String,
+        remember: Boolean = true,
+        silent: Boolean = false,
+        mood: Emotion.Mood? = null
+    ) {
         if (remember) {
             Conversation.add(reply, false)
         }
         addMessage(reply, false)
         if (!silent && Prefs.ttsOn(this)) {
-            tts.speak(reply) { maybeAutoListen() }
+            // mood — только у команд «скажи радостно: …», иначе интонация
+            // определяется по самому тексту ответа
+            tts.speak(reply, mood) { maybeAutoListen() }
         } else {
             setStatus(getString(R.string.status_idle))
             orb.state = OrbView.State.IDLE

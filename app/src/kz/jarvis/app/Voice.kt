@@ -180,16 +180,42 @@ object Voice {
         VoiceProfile.Cmd.Settings -> "Открываю настройки голоса, сэр."
     }
 
+    /**
+     * Выполняет голосовую команду про эмоции и интонацию
+     * («покажи эмоции», «говори эмоциональнее», «скажи радостно: …»).
+     */
+    fun runEmotion(c: Context, cmd: Emotion.Cmd): String = when (cmd) {
+        is Emotion.Cmd.Set -> {
+            Prefs.setExpression(c, cmd.level)
+            when (cmd.level) {
+                Emotion.Level.OFF -> "Хорошо, сэр. Говорю ровно, без интонации."
+                Emotion.Level.LIGHT -> "Эмоции слегка, сэр. Тон и темп меняются мягко."
+                Emotion.Level.FULL ->
+                    "Включаю эмоции на полную, сэр. Вот так — живее? " +
+                        "Радость, тревога и вопрос теперь звучат по-разному."
+            }
+        }
+        is Emotion.Cmd.Say -> cmd.text.ifBlank { Emotion.demoText(Prefs.expression(c)) }
+        Emotion.Cmd.Info -> Emotion.describe(Prefs.expression(c))
+        Emotion.Cmd.Test -> Emotion.demoText(Prefs.expression(c))
+    }
+
     fun describe(c: Context): String {
         val p = Prefs.voiceProfile(c)
         val tone = VoiceProfile.describe(Prefs.voicePitch(c), Prefs.voiceRate(c))
         val manual = Prefs.voiceName(c)
         val voice = if (manual.isEmpty()) "голос подобран автоматически" else "выбран голос $manual"
         val fx = if (Prefs.voiceFx(c)) ", эффект брони включён" else ""
+        val emo = when (Prefs.expression(c)) {
+            Emotion.Level.OFF -> "эмоции выключены"
+            Emotion.Level.LIGHT -> "эмоции слегка"
+            Emotion.Level.FULL -> "эмоции выразительные"
+        }
         val others = VoiceProfile.ALL.filter { it.id != p.id }.joinToString(", ") {
             it.name.substringBefore(" —")
         }
-        return "Сейчас включён профиль «${p.name}»: $tone, $voice$fx. " +
-            "Есть ещё: $others. Скажите, например, «голос брони» или «говори ниже»."
+        return "Сейчас включён профиль «${p.name}»: $tone, $voice, $emo$fx. " +
+            "Есть ещё: $others. Скажите, например, «голос брони», «говори ниже» " +
+            "или «скажи радостно: …»."
     }
 }
