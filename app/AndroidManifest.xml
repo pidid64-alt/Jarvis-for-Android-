@@ -34,8 +34,9 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- напоминания в точное время -->
+    <!-- напоминания и таймеры в точное время -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- «поверх других окон»: сфера над экраном + запуск окон из фона -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- чтобы система не выгружала службу ожидания -->

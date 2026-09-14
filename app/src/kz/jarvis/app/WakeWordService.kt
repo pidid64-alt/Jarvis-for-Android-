@@ -550,9 +550,9 @@ class WakeWordService : Service() {
             null
         }
 
-        if (outcome != null) {
+            if (outcome != null) {
             Conversation.add(text, true)
-            Conversation.add(outcome.reply, false)
+            if (outcome.reply.isNotBlank()) Conversation.add(outcome.reply, false)
 
             // уходим в сон / открываем окно / чужое приложение —
             // непрерывный диалог на этом заканчивается
@@ -618,10 +618,15 @@ class WakeWordService : Service() {
         Conversation.add(text, true)
         working = true
         Llm.chatAsync(this, Conversation.history(), text) { answer ->
+            val final = try {
+                Research.afterModel(this, text, answer)
+            } catch (_: Throwable) {
+                answer
+            }
             ui.post {
                 working = false
-                Conversation.add(answer, false)
-                say(answer) { afterReply() }
+                Conversation.add(final, false)
+                say(final) { afterReply() }
             }
         }
     }

@@ -45,6 +45,11 @@ object Prefs {
     private const val K_STUDY_TOPIC = "study_pending_topic"
     private const val K_SCREEN_WATCH = "screen_watch"
 
+    // секундомер
+    private const val K_SW_RUN = "sw_run"
+    private const val K_SW_START = "sw_start"
+    private const val K_SW_ACC = "sw_acc"
+
     private fun sp(c: Context) = c.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
     // ---------------------------------------------------------- провайдер ИИ
@@ -247,5 +252,17 @@ object Prefs {
         .putString(K_DECK_URI, uri)
         .putString(K_DECK_PATH, path)
         .putString(K_DECK_TOPIC, topic)
+        .apply()
+
+    // -------------------------------------------------------------- секундомер
+
+    fun swRunning(c: Context): Boolean = sp(c).getBoolean(K_SW_RUN, false)
+    fun swStartedAt(c: Context): Long = sp(c).getLong(K_SW_START, 0L)
+    fun swAccrued(c: Context): Long = sp(c).getLong(K_SW_ACC, 0L)
+
+    fun setStopwatch(c: Context, running: Boolean, startedAt: Long, accrued: Long) = sp(c).edit()
+        .putBoolean(K_SW_RUN, running)
+        .putLong(K_SW_START, startedAt)
+        .putLong(K_SW_ACC, accrued)
         .apply()
 }

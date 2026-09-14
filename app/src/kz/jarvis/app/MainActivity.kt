@@ -271,9 +271,14 @@ class MainActivity : Activity() {
         setStatus(getString(R.string.status_thinking))
         orb.state = OrbView.State.THINKING
         Llm.chatAsync(this, Conversation.history().dropLast(1), shown) { answer ->
+            val final = try {
+                Research.afterModel(this, shown, answer)
+            } catch (_: Throwable) {
+                answer
+            }
             ui.post {
                 busy = false
-                deliver(answer, remember = true)
+                deliver(final, remember = true)
             }
         }
     }

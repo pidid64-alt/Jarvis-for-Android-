@@ -63,7 +63,7 @@ object OpenAiClient {
         model: String,
         history: List<Pair<Boolean, String>>,
         text: String,
-        system: String = Persona.SYSTEM_PROMPT,
+        system: String = Persona.live(),
         maxTokens: Int = 600
     ): String {
         val conn = URL(LlmRequests.openAiUrl(baseUrl)).openConnection() as HttpURLConnection
