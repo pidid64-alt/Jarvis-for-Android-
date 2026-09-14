@@ -43,6 +43,8 @@ class SettingsActivity : Activity() {
     private lateinit var sbPitch: SeekBar
     private lateinit var tvRate: TextView
     private lateinit var sbRate: SeekBar
+    private lateinit var spEmotion: Spinner
+    private lateinit var tvEmotionDesc: TextView
     private lateinit var swVoiceFx: Switch
     private lateinit var swClaudeApp: Switch
     private lateinit var tvClaudeDesc: TextView
@@ -96,6 +98,8 @@ class SettingsActivity : Activity() {
         sbPitch = findViewById(R.id.sbPitch)
         tvRate = findViewById(R.id.tvRate)
         sbRate = findViewById(R.id.sbRate)
+        spEmotion = findViewById(R.id.spEmotion)
+        tvEmotionDesc = findViewById(R.id.tvEmotionDesc)
         swVoiceFx = findViewById(R.id.swVoiceFx)
         swClaudeApp = findViewById(R.id.swClaudeApp)
         tvClaudeDesc = findViewById(R.id.tvClaudeDesc)
@@ -605,6 +609,7 @@ class SettingsActivity : Activity() {
         }
 
         showTone()
+        setupEmotion()
         sbPitch.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, value: Int, fromUser: Boolean) {
                 if (!fromUser) return
@@ -653,6 +658,30 @@ class SettingsActivity : Activity() {
         tts = TtsController(this, { }, { runOnUiThread { fillVoiceNames() } })
     }
 
+    /**
+     * Эмоции в речи: выключены / слегка / выразительно.
+     * Переключение сразу слышно — произносим фразу-демонстрацию.
+     */
+    private fun setupEmotion() {
+        spEmotion.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, Emotion.Level.values().map { it.title }
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spEmotion.setSelection(Prefs.expression(this).id)
+        tvEmotionDesc.text = Prefs.expression(this).hint
+        spEmotion.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+                val level = Emotion.Level.values().getOrElse(pos) { Emotion.Level.DEFAULT }
+                tvEmotionDesc.text = level.hint
+                if (level == Prefs.expression(this@SettingsActivity)) return
+                Prefs.setExpression(this@SettingsActivity, level)
+                tts?.refresh()
+                speakSample()
+            }
+
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+    }
+
     private fun showTone() {
         sbPitch.progress = ((Prefs.voicePitch(this) - VoiceProfile.PITCH_MIN) * 100).toInt()
             .coerceIn(0, sbPitch.max)
@@ -673,7 +702,8 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, "Озвучка выключена — включите «Голосовые ответы»", Toast.LENGTH_SHORT).show()
             return
         }
-        tts?.speak(VoiceProfile.sampleText())
+        // фраза-демонстрация: спокойствие, радость, вопрос, предупреждение, ирония
+        tts?.speak(Emotion.demoText(Prefs.expression(this)))
     }
 
     /** Заполняет список системных голосов телефона. */

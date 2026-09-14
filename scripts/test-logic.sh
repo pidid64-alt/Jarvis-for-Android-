@@ -4,7 +4,7 @@
 #  Компилируются те же самые исходники, что попадают в APK:
 #    app/src/kz/jarvis/app/{MathEngine,WakeWords,TimeParse,Timezones,
 #                           Units,LifeCalc,DateFacts,TextTools,Randoms,
-#                           Persona,Providers,LlmRequests,VoiceProfile,
+#                           Persona,Providers,LlmRequests,VoiceProfile,Emotion,
 #                           ResearchPlan,Deck,WebSearch}.kt
 #  + тестовая обёртка tools/LogicTest.kt. Выполняется на JVM.
 #
@@ -53,6 +53,7 @@ JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" "$JAVA_BIN" -Xmx1g -cp "$KJAR" \
   "$ROOT/app/src/kz/jarvis/app/Providers.kt" \
   "$ROOT/app/src/kz/jarvis/app/LlmRequests.kt" \
   "$ROOT/app/src/kz/jarvis/app/VoiceProfile.kt" \
+    "$ROOT/app/src/kz/jarvis/app/Emotion.kt" \
     "$ROOT/app/src/kz/jarvis/app/ResearchPlan.kt" \
     "$ROOT/app/src/kz/jarvis/app/Deck.kt" \
     "$ROOT/app/src/kz/jarvis/app/WebSearch.kt" \

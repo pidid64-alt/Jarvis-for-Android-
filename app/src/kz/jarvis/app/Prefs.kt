@@ -33,6 +33,7 @@ object Prefs {
     private const val K_RATE = "voice_rate"
     private const val K_VOICE_NAME = "voice_name"
     private const val K_VOICE_FX = "voice_fx"
+    private const val K_EXPRESSION = "voice_expression"
 
     // исследования и презентации
     private const val K_CLAUDE_APP = "claude_app"
@@ -211,6 +212,17 @@ object Prefs {
     /** Эффект «брони»: лёгкое эхо поверх речи. */
     fun voiceFx(c: Context): Boolean = sp(c).getBoolean(K_VOICE_FX, false)
     fun setVoiceFx(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_VOICE_FX, v).apply()
+
+    /**
+     * Сила эмоций в речи (см. [Emotion.Level]): выключены / слегка /
+     * выразительно. По умолчанию — выразительно: ровное чтение одной
+     * интонацией звучало как автоответчик.
+     */
+    fun expression(c: Context): Emotion.Level =
+        Emotion.Level.byId(sp(c).getInt(K_EXPRESSION, Emotion.Level.DEFAULT.id))
+
+    fun setExpression(c: Context, level: Emotion.Level) =
+        sp(c).edit().putInt(K_EXPRESSION, level.id).apply()
 
     // ------------------------------------------------- исследования и презентации
 

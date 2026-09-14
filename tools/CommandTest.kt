@@ -2,6 +2,7 @@ package kz.jarvis.tools
 
 import android.content.Context
 import kz.jarvis.app.CommandEngine
+import kz.jarvis.app.Emotion
 
 /**
  * Интеграционная проверка диспетчера команд: вызывается НАСТОЯЩИЙ
@@ -158,6 +159,14 @@ fun main() {
     check("тема «презентации» в справке", true,
         CommandEngine.help("research")?.contains("поищи инфу про"))
     check("тема «голос» в справке", true, CommandEngine.help("voice")?.contains("голос брони"))
+    // Сами команды эмоций трогают Prefs (на JVM — «Stub!»), поэтому здесь
+    // проверяем разбор и справку: их покрывает scripts/test-logic.sh.
+    check("тема «голос» знает про эмоции", true,
+        CommandEngine.help("voice")?.contains("покажи эмоции"))
+    check("тема «голос» знает про «скажи радостно»", true,
+        CommandEngine.help("voice")?.contains("скажи радостно"))
+    check("эмоции — не команда голоса", null, Emotion.parse("голос брони"))
+    check("«проверь голос» не уводим в эмоции", null, Emotion.parse("проверь голос"))
     check("общая справка знает про презентации", true,
         reply("что ты умеешь")?.contains("сделай презентацию"))
 
