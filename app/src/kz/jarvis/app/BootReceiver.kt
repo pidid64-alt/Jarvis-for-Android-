@@ -22,6 +22,10 @@ class BootReceiver : BroadcastReceiver() {
             action == Intent.ACTION_MY_PACKAGE_REPLACED ||
             action == Intent.ACTION_LOCKED_BOOT_COMPLETED
         if (!relevant) return
+
+        // Напоминания и таймеры AlarmManager забывает после перезагрузки.
+        try { ReminderScheduler.restore(context) } catch (e: Exception) { }
+
         if (!Prefs.wakeOn(context)) return
 
         WakeWordService.start(context)   // сработает, если система разрешит

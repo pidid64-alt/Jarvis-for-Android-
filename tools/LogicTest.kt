@@ -13,13 +13,16 @@ import kz.jarvis.app.Providers
 import kz.jarvis.app.MathEngine
 import kz.jarvis.app.Randoms
 import kz.jarvis.app.TextTools
+import kz.jarvis.app.Stopwatch
 import kz.jarvis.app.TimeParse
 import kz.jarvis.app.Timezones
 import kz.jarvis.app.Units
 import kz.jarvis.app.ResearchPlan
 import kz.jarvis.app.VoiceProfile
+import kz.jarvis.app.Know
 import kz.jarvis.app.WakeWords
 import kz.jarvis.app.WebSearch
+import kz.jarvis.app.WindowCmd
 import java.util.Calendar
 import kotlin.random.Random
 
@@ -95,6 +98,39 @@ fun main() {
     check("разбуди в 6 вечера", 18, TimeParse.clock("разбуди меня в 6 вечера")?.hour)
     check("будильник на 7", "07:00", TimeParse.clock("будильник на 7")?.human)
     check("таймер — не будильник", null, TimeParse.clock("таймер на 5 минут"))
+    check("через пять минут", 300, TimeParse.duration("через пять минут")?.seconds)
+    check("через час без цифры", 3600, TimeParse.duration("через час")?.seconds)
+    check("через полчаса", 1800, TimeParse.duration("через полчаса")?.seconds)
+    check("двадцать пять минут", 1500, TimeParse.duration("таймер на двадцать пять минут")?.seconds)
+    check("календарь через 40 дней — не таймер", null, TimeParse.duration("какая дата будет через 40 дней"))
+    check("засеки 10 секунд", 10, TimeParse.duration("засеки 10 секунд")?.seconds)
+    check("разбуди в шесть вечера", 18, TimeParse.clock("разбуди меня в шесть вечера")?.hour)
+    check("напомни через пять минут — задержка", 300_000L,
+        TimeParse.reminder("напомни через пять минут выключить духовку")?.delayMs)
+    check("напомни через пять минут — текст", "выключить духовку",
+        TimeParse.reminder("напомни через пять минут выключить духовку")?.text)
+    check("напомни без текста всё равно ставится", 300_000L,
+        TimeParse.reminder("напомни через 5 минут")?.delayMs)
+    check("напомни в 18:30", "18:30",
+        TimeParse.reminder("напомни в 18:30 позвонить маме")?.clock?.human)
+    check("напомни в семь вечера", 19,
+        TimeParse.reminder("напомни в семь вечера")?.clock?.hour)
+    check("foldNumbers пять", true, TimeParse.foldNumbers("через пять минут").contains("5"))
+
+    println("== Stopwatch ==")
+    check("запусти секундомер", Stopwatch.Cmd.START, Stopwatch.parse("запусти секундомер"))
+    check("останови секундомер", Stopwatch.Cmd.STOP, Stopwatch.parse("останови секундомер"))
+    check("сбрось секундомер", Stopwatch.Cmd.RESET, Stopwatch.parse("сбрось секундомер"))
+    check("сколько на секундомере", Stopwatch.Cmd.STATUS, Stopwatch.parse("сколько на секундомере"))
+    check("просто секундомер — статус", Stopwatch.Cmd.STATUS, Stopwatch.parse("секундомер"))
+    check("засеки время — старт", Stopwatch.Cmd.START, Stopwatch.parse("засеки время"))
+    check("засеки 5 минут — не секундомер", null, Stopwatch.parse("засеки 5 минут"))
+    check("фонарик — не секундомер", null, Stopwatch.parse("включи фонарик"))
+    check("формат 1:05", "1:05", Stopwatch.format(65_000))
+    check("формат часов", "1:02:03", Stopwatch.format(((1 * 3600) + (2 * 60) + 3) * 1000L))
+    check("elapsed идёт", 8_000L, Stopwatch.elapsed(true, 1_000L, 5_000L, 4_000L))
+    check("elapsed пауза", 5_000L, Stopwatch.elapsed(false, 1_000L, 5_000L, 9_000L))
+    check("spoken 65 сек", "1 мин. 5 сек.", Stopwatch.spoken(65_000))
 
     println("== Timezones ==")
     check("лондон (падеж)", "Europe/London", Timezones.find("лондоне"))
@@ -233,6 +269,17 @@ fun main() {
     check("системный промпт — про Джарвиса", true, Persona.SYSTEM_PROMPT.contains("Джарвис"))
     check("системный промпт — по-русски", true, Persona.SYSTEM_PROMPT.contains("по-русски"))
     check("промпт запрещает Markdown", true, Persona.SYSTEM_PROMPT.contains("Markdown"))
+    check("промпт описывает интонацию по тексту, без меток", true,
+        Persona.SYSTEM_PROMPT.contains("читает ответ с интонацией"))
+    check("промпт просит тихий поиск", true, Persona.SYSTEM_PROMPT.contains("[поиск]"))
+    check("промпт предлагает произнести голосовую команду", true,
+        Persona.SYSTEM_PROMPT.contains("предложи произнести команду"))
+    check("промпт больше не говорит, что время неизвестно", false,
+        Persona.SYSTEM_PROMPT.contains("время ты не знаешь"))
+    check("live подставляет часы телефона", true,
+        Persona.live(0L).contains("Сейчас на телефоне владельца"))
+    check("live содержит HH:mm", true,
+        Regex("\\d{2}:\\d{2}").containsMatchIn(Persona.live(0L)))
 
     println("== Запросы к модели ==")
     check("экранирование кавычки", "\"он сказал \\\"привет\\\"\"", LlmRequests.json("он сказал \"привет\""))
@@ -689,6 +736,46 @@ fun main() {
     check("неизвестный номер — по умолчанию", Emotion.Level.DEFAULT, Emotion.Level.byId(9))
     check("описание знает уровень", true,
         Emotion.describe(Emotion.Level.OFF).startsWith("Эмоции выключены"))
+    println("== Окна: «закрой это» ==")
+    check("закрой это", WindowCmd.Kind.CLOSE, WindowCmd.parse("закрой это"))
+    check("закрой окно", WindowCmd.Kind.CLOSE, WindowCmd.parse("закрой окно"))
+    check("закрой", WindowCmd.Kind.CLOSE, WindowCmd.parse("закрой"))
+    check("назад", WindowCmd.Kind.BACK, WindowCmd.parse("назад"))
+    check("вернись", WindowCmd.Kind.BACK, WindowCmd.parse("вернись"))
+    check("сверни", WindowCmd.Kind.HOME, WindowCmd.parse("сверни"))
+    check("закрой приложение", WindowCmd.Kind.HOME, WindowCmd.parse("закрой приложение"))
+    check("закрой ютуб", WindowCmd.Kind.HOME, WindowCmd.parse("закрой ютуб"))
+    check("недавние приложения", WindowCmd.Kind.RECENTS, WindowCmd.parse("покажи недавние приложения"))
+    check("закрой джарвиса — не окно", null, WindowCmd.parse("закрой джарвиса"))
+    check("закрой фонарик — не окно", null, WindowCmd.parse("закрой фонарик"))
+    check("закрой заметки — не окно", null, WindowCmd.parse("закрой заметки"))
+    check("перемотай назад — не окно", null, WindowCmd.parse("перемотай назад"))
+    check("открой ютуб — не окно", null, WindowCmd.parse("открой ютуб"))
+    check("ответ закрываю", "Закрываю, сэр.", WindowCmd.reply(WindowCmd.Kind.CLOSE))
+
+    println("== Тихий поиск, если не знает ==")
+    check("что такое", "квантовый компьютер", Know.directQuery("что такое квантовый компьютер"))
+    check("кто такой", "илон маск", Know.directQuery("кто такой илон маск"))
+    check("что значит", "дедлайн", Know.directQuery("что значит дедлайн"))
+    check("объясни что такое", "фотосинтез", Know.directQuery("объясни что такое фотосинтез"))
+    check("что ты умеешь — не поиск", null, Know.directQuery("что ты умеешь"))
+    check("что такое автоответчик — не поиск", null, Know.directQuery("что такое автоответчик"))
+    check("привет — не факт", null, Know.directQuery("привет"))
+    check("не знаю", true, Know.looksUnknown("К сожалению, я не знаю, что это такое."))
+    check("нет данных", true, Know.looksUnknown("У меня нет информации по этому вопросу, сэр."))
+    check("обычный ответ — знает", false, Know.looksUnknown("Марс — четвёртая планета от Солнца."))
+    check("метка поиск", true, Know.hasSearchTag("[поиск] "))
+    check("метка с запросом", "марс", Know.parseSearchTag("[поиск: марс] текст"))
+    check("strip метки", "текст", Know.stripMeta("[поиск] текст"))
+    check("follow-up по незнанию", "криптон",
+        Know.followUpQuery("что такое криптон", "Я не знаю, сэр."))
+    check("follow-up по метке", "криптон",
+        Know.followUpQuery("расскажи", "[поиск: криптон]"))
+    check("привет не ищем", null, Know.followUpQuery("привет", "Я не знаю."))
+    check("не ищем болтовню", false, Know.worthSearching("спасибо"))
+    check("из выдачи без «нашёл»", true, !Know.spokenFromHits(
+        listOf(WebSearch.Hit("Марс", "Марс — четвёртая планета от Солнца.", "https://x", "Википедия"))
+    ).contains("нашёл"))
 
     println("")
     println("пройдено: $passed, провалено: $failed")
