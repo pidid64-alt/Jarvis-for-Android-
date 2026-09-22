@@ -581,6 +581,18 @@ class WakeWordService : Service() {
             return
         }
         lastTrigger = now
+        // системный диктофон (по умолчанию): открываем его и не берём микрофон
+        if (Prefs.recSystem(this) && Recorder.systemIntent(this) != null) {
+            notifyState("Кодовое слово — открываю диктофон…")
+            overlay?.show("Системный диктофон…")
+            say("Открываю системный диктофон, сэр.") {
+                mode = Mode.WAKE
+                Recorder.systemIntent(this)?.let { launch(it) }
+                // микрофон у диктофона телефона: служба вернётся к слову
+                // «Джарвис», когда он его отпустит
+            }
+            return
+        }
         notifyState("Кодовое слово — включаю диктофон…")
         overlay?.show("Пишу, сэр…")
         // договариваем и только потом берём микрофон: иначе запишем свой голос
@@ -791,6 +803,19 @@ class WakeWordService : Service() {
      */
     private fun startDictaphone() {
         if (!running || recording || Recorder.recording) return
+
+        // системный диктофон телефона (по умолчанию): ответ уже проговорен
+        // диспетчером или кодовым словом — просто открываем, свой не пишет
+        if (Prefs.recSystem(this)) {
+            val sys = Recorder.systemIntent(this)
+            if (sys != null) {
+                mode = Mode.WAKE
+                launch(sys)
+                return
+            }
+            // системного диктофона нет — пишем своим встроенным
+        }
+
         try { speech?.destroy() } catch (e: Exception) { }
         speech = null
         val limit = Prefs.recLimitMin(this)

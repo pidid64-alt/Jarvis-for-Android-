@@ -24,7 +24,10 @@ import java.util.Locale
  * Диктофон Джарвиса: пишет звук с микрофона в WAV и сохраняет его в
  * «Музыка/Jarvis» (Android 8–9 — в папку Jarvis на общей памяти).
  *
- * Почему свой рекордер, а не системное приложение:
+ * По умолчанию запись отдаётся СИСТЕМНОМУ диктофону телефона ([systemIntent]) —
+ * см. Prefs.recSystem и команды «записывай системным/встроенным диктофоном».
+ * Собственный рекордер остаётся вариантом «встроенный» и работает, когда
+ * системного диктофона на телефоне нет:
  *  • запись стартует по КОДОВОМУ СЛОВУ владельца (см. [CodeWords]) — даже
  *    когда телефон в кармане и приложение закрыто;
  *  • между кусками записи Джарвис на пару секунд открывает микрофон для
@@ -40,6 +43,40 @@ object Recorder {
 
     private const val SAMPLE_RATE = 16000
     private const val BYTES_PER_SEC = SAMPLE_RATE * 2   // 16 бит, моно
+
+    /** Диктофоны-заместители (когда стандартный интент никто не принял). */
+    private val SYSTEM_PACKAGES = listOf(
+        "com.google.android.apps.recorder",
+        "com.android.soundrecorder",
+        "com.sec.android.app.voicerecorder",
+        "com.miui.voicerecorder",
+        "org.lineageos.recorder",
+        "com.simplemobiletools.recorder",
+        "com.oneplus.recorder",
+        "net.oneplus.recorder",
+        "com.sonyericsson.soundrecorder",
+        "com.htc.soundrecorder"
+    )
+
+    /**
+     * Интент системного диктофона телефона («Запись голоса», Google Диктофон…);
+     * null — на этом телефоне своего рекордера нет, пишем встроенным [start].
+     */
+    fun systemIntent(c: Context): Intent? {
+        val standard = Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)
+        val resolved = try {
+            standard.resolveActivity(c.packageManager)
+        } catch (e: Exception) { null }
+        if (resolved != null) return standard.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        for (pkg in SYSTEM_PACKAGES) {
+            try {
+                c.packageManager.getLaunchIntentForPackage(pkg)?.let {
+                    return it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } catch (e: Exception) { }
+        }
+        return null
+    }
 
     /** Готовая запись. */
     data class Saved(

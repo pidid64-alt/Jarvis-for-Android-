@@ -626,6 +626,11 @@ fun main() {
     wa("текст сразу после имени", ChatMedia.parseWa("скажи маме в вацапе привет как дела"), "маме", "привет как дела")
     wa("по вацапу", ChatMedia.parseWa("напиши маме по вацапу: скоро буду"), "маме", "скоро буду")
     check("без текста — не разбор", null, ChatMedia.parseWa("напиши маме в вацап"))
+    check("«открой ватсап» — не сообщение", false, ChatMedia.isWaPhrase("открой ватсап"))
+    check("«открой whatsapp» — не сообщение", false, ChatMedia.isWaPhrase("открой whatsapp"))
+    check("«запусти вотсап» — не сообщение", false, ChatMedia.isWaPhrase("запусти вотсап"))
+    check("«открой ватсап» не разбирается в письмо", null, ChatMedia.parseWa("открой ватсап"))
+    check("«напиши … в ватсап» — остаётся письмом", true, ChatMedia.isWaPhrase("напиши маме в ватсап: привет"))
 
     println("== YouTube и Spotify: чистый запрос ==")
     check("ютуб: песня", "shape of you", ChatMedia.youtubeQuery("включи песню shape of you на ютубе"))
@@ -910,6 +915,28 @@ fun main() {
     val st = RecCmd.status(listOf("пиши меня"), true, 10, false, 0)
     check("статус называет слово", true, st.contains("пиши меня"))
     check("статус знает про паузу", true, st.contains("не длиннее"))
+    check("статус — встроенный по умолчанию", true, st.contains("встроенный"))
+    val stSys = RecCmd.status(emptyList(), true, 10, false, 0, system = true)
+    check("статус — системный диктофон", true, stSys.contains("системн"))
+
+    // «запиши: я подъехал» — это запись звука, а не LLM-чат
+    check("запиши фразу — старт", RecCmd.Action.START, RecCmd.parse("запиши: я подъехал")?.action)
+    check("запиши без двоеточия — старт", RecCmd.Action.START, RecCmd.parse("запиши я подъехал")?.action)
+    check("запиши видео — камера, не диктофон", null, RecCmd.parse("запиши видео"))
+    check("запиши заметку — не диктофон", null, RecCmd.parse("запиши заметку купить хлеб"))
+    check("запиши маме в ватсап — не диктофон", null, RecCmd.parse("запиши маме в ватсап привет"))
+    check("запиши сестре в дискорд — не диктофон", null, RecCmd.parse("запиши сестре в дискорд привет"))
+    // выбор диктофона голосом
+    check("записывай системным", RecCmd.Action.SOURCE_SYSTEM,
+        RecCmd.parse("записывай системным диктофоном")?.action)
+    check("переключи на системный", RecCmd.Action.SOURCE_SYSTEM,
+        RecCmd.parse("переключись на системный диктофон")?.action)
+    check("записывай встроенным", RecCmd.Action.SOURCE_BUILTIN,
+        RecCmd.parse("записывай встроенным диктофоном")?.action)
+    check("используй встроенный", RecCmd.Action.SOURCE_BUILTIN,
+        RecCmd.parse("используй встроенный диктофон")?.action)
+    check("обычный стоп остаётся стопом", RecCmd.Action.STOP, RecCmd.parse("стоп запись")?.action)
+    check("включи диктофон остаётся стартом", RecCmd.Action.START, RecCmd.parse("включи диктофон")?.action)
 
     // ================================================ Discord
     println("== Discord ==")

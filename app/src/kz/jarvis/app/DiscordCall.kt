@@ -116,13 +116,36 @@ object DiscordCall {
     private fun viewIntent(ctx: Context, url: String): Intent =
         Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-    /** Интент по сохранённой ссылке (приложению или браузеру). */
+    private fun resolves(ctx: Context, i: Intent): Boolean = try {
+        i.resolveActivity(ctx.packageManager) != null
+    } catch (e: Exception) { false }
+
+    /** Список друзей/личек: лучшее место, чтобы выбрать, кому звонить. */
+    private fun friendsIntent(ctx: Context): Intent? =
+        installed(ctx)?.let { viewIntent(ctx, "discord://-/users/@me").setPackage(it) }
+            ?: appIntent(ctx)
+
+    /**
+     * Интент по сохранённой ссылке. Пробуем по порядку, пока кто-то не откроет:
+     * discord://deep внутри клиента → https внутри клиента → deep в браузере →
+     * просто открыть приложение. Раньше здесь часто оставалась «сырая» ссылка
+     * и Discord не открывался вовсе.
+     */
     private fun linkIntent(ctx: Context, link: String): Intent {
         val deep = Discord.deepLink(link)
-        val i = viewIntent(ctx, deep)
-        // discord:// умеет только сам клиент — направим интент в него
-        if (deep.startsWith("discord://")) installed(ctx)?.let { i.setPackage(it) }
-        return i
+        val pkg = installed(ctx)
+        if (pkg != null) {
+            val inApp = viewIntent(ctx, deep).setPackage(pkg)
+            if (resolves(ctx, inApp)) return inApp
+            val origInApp = viewIntent(ctx, link).setPackage(pkg)
+            if (resolves(ctx, origInApp)) return origInApp
+        }
+        val plainDeep = viewIntent(ctx, deep)
+        if (resolves(ctx, plainDeep)) return plainDeep
+        val plainLink = viewIntent(ctx, link)
+        if (resolves(ctx, plainLink)) return plainLink
+        // ссылка никуда не ведёт — просто открываем Discord
+        return appIntent(ctx) ?: plainLink
     }
 
     /**
@@ -139,15 +162,16 @@ object DiscordCall {
         val wantTap = autoTap && handsEnabled
         when (cmd.kind) {
             Discord.Kind.APP -> {
-                val i = appIntent(ctx)
-                return if (i != null) Plan("Открываю Discord, сэр.", i)
-                else Plan("Discord не установлен и открыть его нечем, сэр.")
+                val have = installed(ctx) != null
+                return Plan(
+                    if (have) "Открываю Discord, сэр."
+                    else "Discord не установлен, сэр — открываю веб-версию.",
+                    appIntent(ctx)
+                )
             }
 
             Discord.Kind.FRIENDS -> {
-                val i = installed(ctx)?.let { viewIntent(ctx, "discord://-/users/@me").setPackage(it) }
-                    ?: appIntent(ctx)
-                return Plan("Открываю список друзей в Discord.", i)
+                return Plan("Открываю список друзей в Discord.", friendsIntent(ctx))
             }
 
             Discord.Kind.ALIAS_LIST -> return Plan(Discord.listText(aliases))
@@ -156,15 +180,25 @@ object DiscordCall {
                 val (link, name) = resolveLink(cmd, aliases)
                 if (link == null) {
                     val who = cmd.who
+                    val isCall = cmd.kind == Discord.Kind.CALL || cmd.kind == Discord.Kind.VIDEO_CALL
+                    // всё равно открываем Discord: без ссылки зайдём в список
+                    // друзей/личек — там можно выбрать, кому звонить
+                    val open = if (isCall) friendsIntent(ctx) else appIntent(ctx)
                     return Plan(
-                        if (who == null) {
-                            "Не знаю, куда заходить в Discord, сэр. Сохраните ссылку: " +
-                                "«запомни канал дискорд общий https://discord.gg/ваша-ссылка»."
-                        } else {
-                            "Ссылку на «$who» в Discord я ещё не знаю, сэр. Скажите: " +
-                                "«запомни канал дискорд $who https://discord.gg/…» — и в следующий раз зайду сам."
+                        when {
+                            who == null && isCall ->
+                                "Открываю Discord, сэр — скажите, кому позвонить."
+                            who == null ->
+                                "Открываю Discord, сэр. Куда заходить — не знаю: сохраните ссылку " +
+                                    "«запомни канал дискорд общий https://discord.gg/…»."
+                            isCall ->
+                                "Открываю Discord, сэр: звонить некуда без ссылки на «$who». " +
+                                    "Скажите «запомни канал дискорд $who https://…» — в следующий раз позвоню сам."
+                            else ->
+                                "Открываю Discord, сэр. Ссылку на «$who» я ещё не знаю: " +
+                                    "«запомни канал дискорд $who https://…» — и в следующий раз зайду сам."
                         },
-                        appIntent(ctx)
+                        open
                     )
                 }
                 val video = cmd.kind == Discord.Kind.VIDEO_CALL
@@ -195,10 +229,10 @@ object DiscordCall {
                 val text = cmd.text
                 if (link == null) {
                     return Plan(
-                        "Чат «${cmd.who ?: name}» в Discord я не знаю: сохраните ссылку " +
+                        "Открываю Discord, сэр, но чат «${cmd.who ?: name}» пока не знаю: " +
                             "«запомни канал дискорд ${cmd.who ?: name} https://discord.com/channels/@me/…». " +
                             (if (text != null) "Текст положил в буфер обмена." else ""),
-                        appIntent(ctx),
+                        friendsIntent(ctx),
                         clipboard = text
                     )
                 }

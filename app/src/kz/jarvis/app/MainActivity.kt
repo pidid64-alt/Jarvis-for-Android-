@@ -190,7 +190,11 @@ class MainActivity : Activity() {
         val words = if (Prefs.recOn(this)) Prefs.recWords(this) else emptyList()
         if (words.isNotEmpty() && !Recorder.recording && CodeWords.matchesAny(words, text)) {
             tts.stop()
-            addMessage(getString(R.string.rec_started_by_word), true)
+            val sys = Prefs.recSystem(this) && Recorder.systemIntent(this) != null
+            addMessage(
+                getString(if (sys) R.string.rec_open_system else R.string.rec_started_by_word),
+                true
+            )
             startDictaphone()
             return
         }
@@ -419,6 +423,19 @@ class MainActivity : Activity() {
      */
     private fun startDictaphone() {
         if (Recorder.recording) return
+        // системный диктофон телефона (по умолчанию) — открываем его
+        if (Prefs.recSystem(this)) {
+            val sys = Recorder.systemIntent(this)
+            if (sys != null) {
+                try {
+                    startActivity(sys)
+                } catch (e: Exception) {
+                    deliver("Не смог открыть системный диктофон, сэр: ${e.message?.take(60) ?: "ошибка"}")
+                }
+                return
+            }
+            // системного нет — пишем встроенным ниже
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10)
             return

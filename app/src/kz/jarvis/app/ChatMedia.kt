@@ -29,8 +29,15 @@ object ChatMedia {
     /** Итог разбора: кому (как сказано) и что написать. */
     data class WaMsg(val name: String, val body: String)
 
-    /** Содержит ли фраза упоминание WhatsApp (отправка именно туда). */
-    fun isWaPhrase(s: String): Boolean = WA_TOKEN.containsMatchIn(s)
+    /** «открой / запусти ватсап» — это запуск приложения, а не написание сообщения. */
+    private val OPEN_VERB = Regex(
+        "^(?:открой|открыть|отпусти|запусти|запустить|зайди|загрузи)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Содержит ли фраза упоминание WhatsApp как цель сообщения (а не «открой»). */
+    fun isWaPhrase(s: String): Boolean =
+        WA_TOKEN.containsMatchIn(s) && !OPEN_VERB.containsMatchIn(s.trim())
 
     /**
      * Разбирает «напиши маме в вацап: я уже еду», «отправь в вацап папе что я занят»…

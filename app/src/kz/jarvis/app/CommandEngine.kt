@@ -1062,13 +1062,45 @@ object CommandEngine {
         val cmd = RecCmd.parse(s) ?: return null
         val words = Prefs.recWords(ctx)
         val limit = Prefs.recLimitMin(ctx)
+        val system = Prefs.recSystem(ctx)
         return when (cmd.action) {
+            RecCmd.Action.SOURCE_SYSTEM -> {
+                Prefs.setRecSystem(ctx, true)
+                Outcome(
+                    "Принято, сэр: записывает системный диктофон телефона — " +
+                        "открою его по команде «включи диктофон» и по кодовому слову."
+                )
+            }
+
+            RecCmd.Action.SOURCE_BUILTIN -> {
+                Prefs.setRecSystem(ctx, false)
+                Outcome(
+                    "Хорошо, сэр: пишу своим встроенным диктофоном — " +
+                        "запись идёт молча, файлы будут в «Музыка/Jarvis»."
+                )
+            }
+
             RecCmd.Action.START ->
                 if (Recorder.recording) {
                     Outcome(
                         "Запись уже идёт, сэр: ${RecCmd.durationLabel(Recorder.elapsedSeconds())}. " +
                             "Скажите «стоп запись», чтобы сохранить."
                     )
+                } else if (system) {
+                    val sys = Recorder.systemIntent(ctx)
+                    if (sys != null) {
+                        Outcome(
+                            "Открываю системный диктофон, сэр. Нажмите запись — и говорите.",
+                            sys.withTask(ctx),
+                            endDialog = true
+                        )
+                    } else {
+                        Outcome(
+                            "Системного диктофона на телефоне нет, сэр — пишу своим встроенным.",
+                            endDialog = true,
+                            record = RecCmd.Action.START
+                        )
+                    }
                 } else {
                     Outcome(
                         "Пишу, сэр. Остановите фразой «стоп запись» — или кнопкой в уведомлении.",
@@ -1080,6 +1112,8 @@ object CommandEngine {
             RecCmd.Action.STOP ->
                 if (Recorder.recording) {
                     Outcome("", silent = true, record = RecCmd.Action.STOP)
+                } else if (system) {
+                    Outcome("Записью управляет системный диктофон, сэр: нажмите «Стоп» в нём.")
                 } else {
                     Outcome("Запись не идёт, сэр.")
                 }
@@ -1134,7 +1168,8 @@ object CommandEngine {
                         enabled = Prefs.recOn(ctx) && words.isNotEmpty(),
                         limitMin = limit,
                         recording = Recorder.recording,
-                        elapsedSec = Recorder.elapsedSeconds()
+                        elapsedSec = Recorder.elapsedSeconds(),
+                        system = system
                     )
                 )
 

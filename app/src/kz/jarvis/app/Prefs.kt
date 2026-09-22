@@ -51,6 +51,7 @@ object Prefs {
     private const val K_REC_ON = "rec_on"
     private const val K_REC_LIMIT = "rec_limit_min"
     private const val K_REC_GAP = "rec_gap_sec"
+    private const val K_REC_SYSTEM = "rec_system"
     private const val K_REC_INDEX = "rec_index"
 
     // звонки в Discord
@@ -297,6 +298,10 @@ object Prefs {
      * Как часто во время записи открывать микрофон распознавателю, чтобы
      * услышать «стоп запись» (секунды). 0 — не слушать, запись без пауз.
      */
+    /** true — записывает системный диктофон телефона (по умолчанию), false — встроенный Recorder. */
+    fun recSystem(c: Context): Boolean = sp(c).getBoolean(K_REC_SYSTEM, true)
+    fun setRecSystem(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_REC_SYSTEM, v).apply()
+
     fun recGapSec(c: Context): Int = sp(c).getInt(K_REC_GAP, 60).coerceIn(0, 600)
     fun setRecGapSec(c: Context, v: Int) = sp(c).edit().putInt(K_REC_GAP, v.coerceIn(0, 600)).apply()
 

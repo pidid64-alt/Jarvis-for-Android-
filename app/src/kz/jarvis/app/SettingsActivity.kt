@@ -72,6 +72,7 @@ class SettingsActivity : Activity() {
     private lateinit var etRecWords: EditText
     private lateinit var spRecLimit: Spinner
     private lateinit var spRecGap: Spinner
+    private lateinit var spRecSource: Spinner
     private lateinit var swDiscordTap: Switch
     private lateinit var etDiscordLinks: EditText
     private lateinit var btnDiscordHands: Button
@@ -134,6 +135,7 @@ class SettingsActivity : Activity() {
         etRecWords = findViewById(R.id.etRecWords)
         spRecLimit = findViewById(R.id.spRecLimit)
         spRecGap = findViewById(R.id.spRecGap)
+        spRecSource = findViewById(R.id.spRecSource)
         swDiscordTap = findViewById(R.id.swDiscordTap)
         etDiscordLinks = findViewById(R.id.etDiscordLinks)
         btnDiscordHands = findViewById(R.id.btnDiscordHands)
@@ -530,6 +532,25 @@ class SettingsActivity : Activity() {
                 val g = gaps.getOrElse(position) { 60 }
                 if (g != Prefs.recGapSec(this@SettingsActivity)) {
                     Prefs.setRecGapSec(this@SettingsActivity, g)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        // кто записывает: системный диктофон телефона или встроенный Джарвис
+        spRecSource.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item,
+            listOf("Системный диктофон", "Встроенный (Джарвис)")
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spRecSource.setSelection(if (Prefs.recSystem(this)) 0 else 1)
+        spRecSource.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long
+            ) {
+                val sys = position == 0
+                if (sys != Prefs.recSystem(this@SettingsActivity)) {
+                    Prefs.setRecSystem(this@SettingsActivity, sys)
                 }
             }
 

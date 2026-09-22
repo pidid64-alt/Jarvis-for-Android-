@@ -16,7 +16,8 @@ object RecCmd {
 
     enum class Action {
         START, STOP, STATUS, LIST, PLAY_LAST, DELETE_LAST,
-        SET_WORD, CLEAR_WORD, LIMIT, ENABLE, DISABLE
+        SET_WORD, CLEAR_WORD, LIMIT, ENABLE, DISABLE,
+        SOURCE_SYSTEM, SOURCE_BUILTIN
     }
 
     /**
@@ -28,14 +29,15 @@ object RecCmd {
 
     /** Фраза вообще про диктофон/запись звука. */
     private val ABOUT = Regex(
-        "диктофон|запис[а-я]*(?: звука|голоса|аудио)?|записыва[а-я]*|пиши меня|пиши звук|пиши голос|" +
+        "диктофон|запиши|запис[а-я]*(?: звука|голоса|аудио)?|записыва[а-я]*|пиши меня|пиши звук|пиши голос|" +
             "кодов[а-я]* (?:слово|слову|словом|слове|фразу|фразе|фразой)|голосов(?:ая|ой) заметк"
     )
 
     /** Слова, с которыми «запись» значит не звук: заметка, список, напоминание. */
     private val NOT_SOUND = Regex(
-        "заметк|списк|покупк|напоминан|номер|логин|парол|телефон|экран|видео с экрана|" +
-            "правил|звонк|историю|вызов|музык|песн|трек"
+        "заметк|списк|покупк|напоминан|номер|логин|парол|телефон|экран|видео|" +
+            "правил|звонк|историю|вызов|музык|песн|трек|" +
+            "вацап|васап|ватсап|вотсап|воцап|whatsapp|телеграм|дискорд|discord|смс|мессенджер"
     )
 
     /** «не пиши маме» — это правило автоответа, а не диктофон. */
@@ -101,6 +103,17 @@ object RecCmd {
                 .containsMatchIn(s)
         ) {
             return Cmd(Action.LIST)
+        }
+
+        // ---- какой диктофон пишет: системный или встроенный ----
+        val srcVerb = "(?:записывай|переключи(?:сь)?|используй|поставь|сделай|давай)"
+        if (Regex("$srcVerb\\s+(?:мне\\s+)?(?:на\\s+)?(?:через\\s+)?системн").containsMatchIn(s)) {
+            return Cmd(Action.SOURCE_SYSTEM)
+        }
+        if (Regex("$srcVerb\\s+(?:мне\\s+)?(?:на\\s+)?(?:через\\s+)?" +
+                "(?:свой|встроенн[а-я]*|внутренн[а-я]*)").containsMatchIn(s)
+        ) {
+            return Cmd(Action.SOURCE_BUILTIN)
         }
 
         // ---- старт ----
@@ -186,11 +199,15 @@ object RecCmd {
     /**
      * Ответ на «что с диктофоном»: кодовое слово, ограничение, идёт ли запись.
      */
-    fun status(words: List<String>, enabled: Boolean, limitMin: Int, recording: Boolean, elapsedSec: Long): String {
+    fun status(
+        words: List<String>, enabled: Boolean, limitMin: Int,
+        recording: Boolean, elapsedSec: Long, system: Boolean = false
+    ): String {
         val rec = if (recording) " Сейчас идёт запись — ${durationLabel(elapsedSec)}." else ""
         return buildString {
             append("Диктофон: ")
             append(if (recording) "пишу звук." else if (enabled) "готов к записи." else "выключен.")
+            append(if (system) " Записывает системный диктофон телефона." else " Пишет встроенный диктофон Джарвиса.")
             append(rec)
             if (words.isNotEmpty()) {
                 append(" Кодовое слово: «").append(words.joinToString("», «")).append("» — ")
@@ -211,6 +228,8 @@ object RecCmd {
         • «какое кодовое слово», «убери кодовое слово» — спросить и сбросить
         • «запись максимум 5 минут» — ограничение длины одной записи
         • «покажи записи», «включи последнюю запись», «удали последнюю запись»
+        • «записывай системным диктофоном» / «записывай встроенным» — открывать
+          диктофон телефона или писать самому Джарвису (по умолчанию — системный)
         Записи сохраняются в «Музыка/Jarvis» (на Android 8–9 — в папку Jarvis),
         во время записи в уведомлении есть кнопка «Остановить».
     """.trimIndent()
