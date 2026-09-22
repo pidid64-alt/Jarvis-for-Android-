@@ -44,6 +44,18 @@ object Prefs {
     // изучение темы и наблюдение за экраном
     private const val K_STUDY_TOPIC = "study_pending_topic"
     private const val K_SCREEN_WATCH = "screen_watch"
+    private const val K_SCREEN_EVERY = "screen_watch_min"
+
+    // диктофон и своё кодовое слово
+    private const val K_REC_WORDS = "rec_words"
+    private const val K_REC_ON = "rec_on"
+    private const val K_REC_LIMIT = "rec_limit_min"
+    private const val K_REC_GAP = "rec_gap_sec"
+    private const val K_REC_INDEX = "rec_index"
+
+    // звонки в Discord
+    private const val K_DISCORD_LINKS = "discord_links"
+    private const val K_DISCORD_TAP = "discord_auto_call"
 
     // секундомер
     private const val K_SW_RUN = "sw_run"
@@ -253,6 +265,80 @@ object Prefs {
         .putString(K_DECK_PATH, path)
         .putString(K_DECK_TOPIC, topic)
         .apply()
+
+    /** Как часто читать экран, минуты (см. [ScreenWatch]). */
+    fun screenWatchMin(c: Context): Int =
+        ScreenWatch.snap(sp(c).getInt(K_SCREEN_EVERY, ScreenWatch.DEFAULT_MIN))
+
+    fun setScreenWatchMin(c: Context, minutes: Int) =
+        sp(c).edit().putInt(K_SCREEN_EVERY, ScreenWatch.snap(minutes)).apply()
+
+    // --------------------------------------------------------- диктофон
+
+    /** Свои кодовые фразы: услышав их, Джарвис включает запись. */
+    fun recWords(c: Context): List<String> =
+        CodeWords.parseList(sp(c).getString(K_REC_WORDS, "").orEmpty())
+
+    fun setRecWords(c: Context, words: List<String>) = sp(c).edit()
+        .putString(K_REC_WORDS, words.map { CodeWords.normalize(it) }.filter { it.isNotEmpty() }
+            .distinct().joinToString("\n"))
+        .apply()
+
+    /** Ждать ли кодовое слово (выключается, не стирая сами слова). */
+    fun recOn(c: Context): Boolean = sp(c).getBoolean(K_REC_ON, true)
+    fun setRecOn(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_REC_ON, v).apply()
+
+    /** Ограничение длины одной записи, минуты. */
+    fun recLimitMin(c: Context): Int = sp(c).getInt(K_REC_LIMIT, 10).coerceIn(1, 600)
+    fun setRecLimitMin(c: Context, v: Int) =
+        sp(c).edit().putInt(K_REC_LIMIT, v.coerceIn(1, 600)).apply()
+
+    /**
+     * Как часто во время записи открывать микрофон распознавателю, чтобы
+     * услышать «стоп запись» (секунды). 0 — не слушать, запись без пауз.
+     */
+    fun recGapSec(c: Context): Int = sp(c).getInt(K_REC_GAP, 60).coerceIn(0, 600)
+    fun setRecGapSec(c: Context, v: Int) = sp(c).edit().putInt(K_REC_GAP, v.coerceIn(0, 600)).apply()
+
+    /** Одна сохранённая запись. */
+    data class RecEntry(val name: String, val where: String, val seconds: Long, val uri: String)
+
+    /** Список записей: «имя|куда сохранили|секунды|uri» по строке на запись. */
+    fun recordings(c: Context): List<RecEntry> =
+        sp(c).getString(K_REC_INDEX, "").orEmpty().lines().mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size < 4 || p[0].isBlank()) return@mapNotNull null
+            RecEntry(p[0], p[1], p[2].toLongOrNull() ?: 0L, p[3])
+        }
+
+    fun setRecordings(c: Context, list: List<RecEntry>) = sp(c).edit()
+        .putString(K_REC_INDEX, list.takeLast(30).joinToString("\n") {
+            "${it.name}|${it.where}|${it.seconds}|${it.uri}"
+        })
+        .apply()
+
+    fun addRecording(c: Context, name: String, where: String, seconds: Long, uri: String) =
+        setRecordings(c, recordings(c) + RecEntry(name, where, seconds, uri))
+
+    // ------------------------------------------------------------- Discord
+
+    /** Сохранённые ссылки Discord: «имя|ссылка» (см. [Discord.parseAliases]). */
+    fun discordLinks(c: Context): List<Discord.Alias> =
+        Discord.parseAliases(sp(c).getString(K_DISCORD_LINKS, "").orEmpty())
+
+    fun setDiscordLinks(c: Context, list: List<Discord.Alias>) =
+        sp(c).edit().putString(K_DISCORD_LINKS, Discord.serialize(list)).apply()
+
+    fun addDiscordLink(c: Context, alias: Discord.Alias) =
+        setDiscordLinks(c, Discord.upsert(discordLinks(c), alias))
+
+    fun removeDiscordLink(c: Context, name: String) =
+        setDiscordLinks(c, Discord.remove(discordLinks(c), name))
+
+    /** Самому нажимать кнопку звонка в Discord (нужен сервис спец. возможностей). */
+    fun discordAutoCall(c: Context): Boolean = sp(c).getBoolean(K_DISCORD_TAP, true)
+    fun setDiscordAutoCall(c: Context, v: Boolean) =
+        sp(c).edit().putBoolean(K_DISCORD_TAP, v).apply()
 
     // -------------------------------------------------------------- секундомер
 

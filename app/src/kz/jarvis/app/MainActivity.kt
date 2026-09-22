@@ -148,9 +148,18 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacks(recTick)
         speech?.destroy()
         speech = null
         tts.shutdown()
+        // запись не бросаем: если окно закрывается, а диктофон ещё пишет,
+        // остановить его можно кнопкой в уведомлении (поднимет службу)
+        if (Recorder.recording && !Prefs.wakeOn(this)) {
+            try {
+                val saved = Recorder.stop(this)
+                Notify.recordingSaved(applicationContext, saved)
+            } catch (e: Exception) { }
+        }
         super.onDestroy()
     }
 
@@ -177,6 +186,14 @@ class MainActivity : Activity() {
 
     private fun handleUser(text: String) {
         if (text.isBlank() || busy) return
+        // своё кодовое слово диктофона: услышали — пишем звук
+        val words = if (Prefs.recOn(this)) Prefs.recWords(this) else emptyList()
+        if (words.isNotEmpty() && !Recorder.recording && CodeWords.matchesAny(words, text)) {
+            tts.stop()
+            addMessage(getString(R.string.rec_started_by_word), true)
+            startDictaphone()
+            return
+        }
         val shown = WakeWords.removeFromText(text).ifBlank { text }
         tts.stop()
 
@@ -221,6 +238,20 @@ class MainActivity : Activity() {
                 Prefs.setWakeOn(this, false)
                 WakeWordService.stop(this)
                 refreshWakeIcon()
+            }
+            if (outcome.record == RecCmd.Action.START) {
+                lastInputVoice = false   // во время записи микрофон у диктофона
+                addMessage(outcome.reply, false)
+                if (Prefs.ttsOn(this)) {
+                    tts.speak(outcome.reply) { startDictaphone() }
+                } else {
+                    startDictaphone()
+                }
+                return
+            }
+            if (outcome.record == RecCmd.Action.STOP) {
+                stopDictaphone("остановлено голосом")
+                return
             }
             if (outcome.launch != null) {
                 try {
@@ -370,10 +401,83 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
+    // ---------------- диктофон ----------------
+
+    /** Тик статуса, пока идёт запись. */
+    private val recTick = object : Runnable {
+        override fun run() {
+            if (!Recorder.recording) return
+            setStatus(getString(R.string.status_recording, RecCmd.durationLabel(Recorder.elapsedSeconds())))
+            Notify.recording(applicationContext, Recorder.elapsedSeconds())
+            ui.postDelayed(this, 5_000)
+        }
+    }
+
+    /**
+     * Включить диктофон. Работает и из окна, и по кодовому слову: микрофон
+     * один, поэтому распознавание сначала останавливаем.
+     */
+    private fun startDictaphone() {
+        if (Recorder.recording) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10)
+            return
+        }
+        stopListening()
+        tts.stop()
+        busy = true
+        val err = try {
+            Recorder.start(this, Prefs.recLimitMin(this)) {
+                ui.post { if (!isFinishing && !isDestroyed) stopDictaphone("время записи вышло") }
+            }
+        } catch (e: Exception) {
+            e.message?.take(80) ?: "сбой записи"
+        }
+        busy = false
+        if (err != null) {
+            deliver(err)
+            return
+        }
+        lastInputVoice = false
+        setStatus(getString(R.string.status_recording, RecCmd.durationLabel(0)))
+        orb.state = OrbView.State.LISTENING
+        Notify.recording(applicationContext, 0)
+        ui.postDelayed(recTick, 5_000)
+    }
+
+    /** Остановить запись и показать, куда сохранили. */
+    private fun stopDictaphone(why: String) {
+        ui.removeCallbacks(recTick)
+        if (!Recorder.recording) {
+            busy = false
+            setStatus(getString(R.string.status_idle))
+            orb.state = OrbView.State.IDLE
+            return
+        }
+        val saved = try {
+            Recorder.stop(this)
+        } catch (e: Exception) {
+            Recorder.Saved(false, error = e.message?.take(80) ?: "сбой сохранения")
+        }
+        Notify.recordingSaved(applicationContext, saved)
+        val text = when {
+            !saved.ok && saved.error.isNotBlank() -> "Запись не сохранилась, сэр: ${saved.error}"
+            saved.seconds < 1 -> "Звук не записался, сэр: получилось меньше секунды."
+            else -> "Готово, сэр: запись на ${RecCmd.durationLabel(saved.seconds)}, сохранил в ${saved.where}." +
+                (if (why.isNotBlank()) " ($why)" else "")
+        }
+        deliver(text)
+    }
+
     // ---------------- голосовой ввод ----------------
 
     private fun startListening() {
         if (busy) return
+        // микрофон у диктофона — распознавание сейчас не поднять
+        if (Recorder.recording) {
+            setStatus(getString(R.string.status_recording, RecCmd.durationLabel(Recorder.elapsedSeconds())))
+            return
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10)
             return

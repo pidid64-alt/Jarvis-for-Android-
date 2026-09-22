@@ -12,7 +12,9 @@ object Notify {
 
     const val CH_REMINDERS = "jarvis_reminders"
     const val CH_AUTO = "jarvis_auto"
+    const val CH_REC = "jarvis_recorder"
     private const val ID_REMINDER_BASE = 4200
+    private const val ID_REC = 79
 
     fun createChannels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
@@ -41,6 +43,72 @@ object Notify {
         )
         auto.description = "Что Джарвис ответил в мессенджерах за вас"
         nm.createNotificationChannel(auto)
+
+        val rec = NotificationChannel(
+            CH_REC,
+            "Диктофон",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        rec.description = "Идёт запись звука и готовые записи Джарвиса"
+        rec.setShowBadge(false)
+        nm.createNotificationChannel(rec)
+    }
+
+    // ------------------------------------------------------------------ диктофон
+
+    /** Идёт запись: видно, сколько уже написано, и есть кнопка «Остановить». */
+    fun recording(c: Context, seconds: Long) {
+        val stop = PendingIntent.getService(
+            c, 20,
+            Intent(c, WakeWordService::class.java).setAction(WakeWordService.ACTION_REC_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n: Notification = Notification.Builder(c, CH_REC)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle("Джарвис пишет звук")
+            .setContentText("Идёт запись: " + RecCmd.durationLabel(seconds))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .addAction(0, "Остановить", stop)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(ID_REC, n)
+        } catch (e: Exception) { }
+    }
+
+    /** Запись готова: нажатие открывает её в плеере. */
+    fun recordingSaved(c: Context, saved: Recorder.Saved) {
+        if (!saved.ok) {
+            recordingNote(c, "Запись не сохранилась", saved.error)
+            return
+        }
+        val uri = saved.uri
+        val open = if (uri != null) PendingIntent.getActivity(
+            c, 21, Recorder.openIntent(c, uri),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        ) else null
+        val n: Notification = Notification.Builder(c, CH_REC)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle("Запись готова · " + RecCmd.durationLabel(saved.seconds))
+            .setContentText(saved.where)
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(ID_REC, n)
+        } catch (e: Exception) { }
+    }
+
+    private fun recordingNote(c: Context, title: String, text: String) {
+        val n: Notification = Notification.Builder(c, CH_REC)
+            .setSmallIcon(R.drawable.ic_mic_bg)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .build()
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(ID_REC, n)
+        } catch (e: Exception) { }
     }
 
     fun reminder(c: Context, text: String) {

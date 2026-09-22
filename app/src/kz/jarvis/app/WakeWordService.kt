@@ -45,6 +45,7 @@ class WakeWordService : Service() {
         const val EXTRA_AUTO_LISTEN = "auto_listen"
 
         const val ACTION_SPEAK = "kz.jarvis.app.action.SPEAK"
+        const val ACTION_REC_STOP = "kz.jarvis.app.action.REC_STOP"
         const val ACTION_RESUME = "kz.jarvis.app.action.RESUME"
         const val ACTION_UI_ACTIVE = "kz.jarvis.app.action.UI_ACTIVE"
         const val ACTION_OFF = "kz.jarvis.app.action.OFF"
@@ -108,7 +109,12 @@ class WakeWordService : Service() {
         }
     }
 
-    private enum class Mode { WAKE, COMMAND }
+    /**
+     * WAKE — ждём слово «Джарвис» (или кодовое слово диктофона),
+     * COMMAND — слушаем команду,
+     * RECORD — пишем звук, микрофон у диктофона (см. [Recorder]).
+     */
+    private enum class Mode { WAKE, COMMAND, RECORD }
 
     /** Фразы, после которых разговор завершается (ждём «Джарвис» снова). */
     private val GOODBYE = Regex(
@@ -151,6 +157,20 @@ class WakeWordService : Service() {
     /** Поколение перезапусков: новый restartListening отменяет старые отложенные. */
     private var listenGen = 0
 
+    // ------------------------------------------------------------ диктофон
+
+    /** Идёт запись звука (микрофон у [Recorder], распознаватель выключен). */
+    @Volatile private var recording = false
+
+    /** Сейчас запись поставлена на паузу и мы слушаем «стоп запись». */
+    @Volatile private var recGapListening = false
+
+    /** Когда начался текущий кусок записи — от него считаем паузу на команду. */
+    private var recSegmentStart = 0L
+
+    /** Когда в последний раз обновляли уведомление о записи. */
+    private var lastRecNotify = 0L
+
     /** Сколько раз подряд распознаватель умер молча (без колбэков). */
     private var silentDrops = 0
 
@@ -180,8 +200,22 @@ class WakeWordService : Service() {
                     return START_NOT_STICKY
                 }
             }
+            ACTION_REC_STOP -> {
+                // кнопка «Остановить» в уведомлении диктофона
+                if (recording || Recorder.recording) {
+                    if (!running) {
+                        finishDictaphone("остановлено из уведомления")
+                        stopSelf(startId)
+                        return START_NOT_STICKY
+                    }
+                    finishDictaphone("остановлено из уведомления")
+                } else if (!running) {
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+            }
             ACTION_RESUME -> {
-                if (running && !snoozed() && speech == null) restartListening(200)
+                if (running && !snoozed() && speech == null && mode != Mode.RECORD) restartListening(200)
             }
             ACTION_UI_ACTIVE -> {
                 // окно приложения открылось — отдаём ему микрофон немедленно,
@@ -190,10 +224,17 @@ class WakeWordService : Service() {
                 if (running) {
                     followUp = false
                     waitingFollowUp = false
-                    mode = Mode.WAKE
                     try { speech?.destroy() } catch (e: Exception) { }
                     speech = null
-                    restartListening(3_000)
+                    if (recording) {
+                        // диктофон держит микрофон — окно его не отберёт
+                        recGapListening = false
+                        mode = Mode.RECORD
+                        restartListening(3_000)
+                    } else {
+                        mode = Mode.WAKE
+                        restartListening(3_000)
+                    }
                 }
             }
         }
@@ -226,6 +267,15 @@ class WakeWordService : Service() {
     override fun onDestroy() {
         running = false
         ui.removeCallbacks(watchdog)
+        // служба умирает — запись надо сохранить, а не выбросить
+        if (recording || Recorder.recording) {
+            try {
+                val saved = Recorder.stop(this)
+                Notify.recordingSaved(this, saved)
+            } catch (e: Exception) { }
+            recording = false
+            recGapListening = false
+        }
         try { speech?.destroy() } catch (e: Exception) { }
         speech = null
         try { tone?.release() } catch (e: Exception) { }
@@ -331,6 +381,9 @@ class WakeWordService : Service() {
             // микрофон в это время не включаем: услышим собственный голос
             if (speaking || SpeechState.speaking()) { restartListening(500); return@postDelayed }
             if (snoozed()) { restartListening(5_000); return@postDelayed }
+            // идёт запись: микрофон у диктофона, распознаватель включаем только
+            // в коротких паузах, чтобы услышать «стоп запись»
+            if (mode == Mode.RECORD && !recGapListening) return@postDelayed
             if (uiActive && mode == Mode.WAKE) {
                 // окно приложения открыто и само владеет микрофоном — не мешаем,
                 // но если микрофон остался у нас, освобождаем
@@ -372,6 +425,12 @@ class WakeWordService : Service() {
             val idle = System.currentTimeMillis() - lastCallback
             when {
                 snoozed() -> { /* спим */ }
+                // диктофон: следим за временем и за паузами «стоп запись»
+                mode == Mode.RECORD && !recGapListening -> tickRecording()
+                mode == Mode.RECORD && recGapListening && idle > 6_000 -> {
+                    // в паузе ничего не услышали — снова пишем
+                    closeRecGap()
+                }
                 mode == Mode.WAKE && uiActive -> { /* микрофон у окна приложения */ }
                 mode == Mode.WAKE && idle > 15_000 -> {
                     silentDrops++
@@ -466,6 +525,66 @@ class WakeWordService : Service() {
             }
         }
         return true
+    }
+
+    /**
+     * Что услышали в паузе между кусками записи: «стоп запись», повтор
+     * кодового слова, «Джарвис» (тогда запись заканчивается и дальше идёт
+     * обычный диалог) или ничего — тогда просто пишем дальше.
+     */
+    private fun onGapHeard(text: String?) {
+        if (text.isNullOrBlank()) {
+            closeRecGap()
+            return
+        }
+        val words = recWords()
+        when {
+            CodeWords.isStop(text) -> finishDictaphone("остановлено голосом")
+            CodeWords.isStopByPhrase(words, text) -> finishDictaphone("остановлено кодовым словом")
+            WakeWords.contains(text) -> {
+                val tail = WakeWords.removeFromText(text)
+                finishDictaphone("остановлено словом «Джарвис»") {
+                    if (tail.isNotBlank()) {
+                        mode = Mode.COMMAND
+                        handleCommand(tail)
+                    }
+                }
+            }
+            else -> closeRecGap()
+        }
+    }
+
+    /**
+     * Своё кодовое слово диктофона: услышали — включаем запись.
+     * Слово задаёт владелец («кодовое слово: пиши меня»), в программе ничего
+     * не зашито; сравнение терпимое к ошибкам распознавания (см. [CodeWords]).
+     */
+    private fun onCodeWord(texts: ArrayList<String>?) {
+        val words = recWords()
+        if (words.isEmpty() || SpeechState.speaking() || App.uiVisible) {
+            restartListening(150)
+            return
+        }
+        var hit: String? = null
+        if (texts != null) {
+            for (t in texts) {
+                if (t != null && CodeWords.matchesAny(words, t)) { hit = t; break }
+            }
+        }
+        if (hit == null) {
+            restartListening(150)
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastTrigger < 3_500) {
+            restartListening(150)
+            return
+        }
+        lastTrigger = now
+        notifyState("Кодовое слово — включаю диктофон…")
+        overlay?.show("Пишу, сэр…")
+        // договариваем и только потом берём микрофон: иначе запишем свой голос
+        say("Пишу, сэр.") { startDictaphone() }
     }
 
     private fun beep() {
@@ -577,6 +696,17 @@ class WakeWordService : Service() {
                 say(outcome.reply) { stopSelf() }
                 return
             }
+            if (outcome.record == RecCmd.Action.START) {
+                // сначала договариваем, потом пишем: иначе в запись попадёт свой голос
+                followUp = false
+                closeAfterReply = true
+                say(outcome.reply) { startDictaphone() }
+                return
+            }
+            if (outcome.record == RecCmd.Action.STOP) {
+                finishDictaphone("остановлено голосом")
+                return
+            }
             if (outcome.async != null) {
                 // сначала голосом подтверждаем, что взялись за дело
                 if (outcome.reply.isNotBlank()) say(outcome.reply)
@@ -647,6 +777,129 @@ class WakeWordService : Service() {
                 restartListening(0)
             }
         }, minutes * 60_000L)
+    }
+
+    // ------------------------------------------------------------------ диктофон
+
+    /** Кодовые слова диктофона, если владелец их задал и не выключил. */
+    private fun recWords(): List<String> =
+        if (Prefs.recOn(this)) Prefs.recWords(this) else emptyList()
+
+    /**
+     * Начать запись. Микрофон передаётся [Recorder], распознаватель гаснет:
+     * двух владельцев микрофона Android не терпит.
+     */
+    private fun startDictaphone() {
+        if (!running || recording || Recorder.recording) return
+        try { speech?.destroy() } catch (e: Exception) { }
+        speech = null
+        val limit = Prefs.recLimitMin(this)
+        val err = try {
+            Recorder.start(this, limit) { ui.post { finishDictaphone("время записи вышло") } }
+        } catch (e: Exception) {
+            e.message?.take(80) ?: "сбой записи"
+        }
+        if (err != null) {
+            mode = Mode.WAKE
+            say(err) { backToWake() }
+            return
+        }
+        recording = true
+        recGapListening = false
+        recSegmentStart = System.currentTimeMillis()
+        lastRecNotify = recSegmentStart
+        followUp = false
+        waitingFollowUp = false
+        mode = Mode.RECORD
+        beep()
+        overlay?.update("● Пишу звук…")
+        notifyState("Идёт запись — скажите «стоп запись»")
+        Notify.recording(this, 0)
+    }
+
+    /** Пока пишем: обновляем уведомление и открываем паузу для «стоп запись». */
+    private fun tickRecording() {
+        if (!Recorder.recording) {
+            finishDictaphone("запись оборвалась")
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastRecNotify >= 15_000) {
+            lastRecNotify = now
+            val sec = Recorder.elapsedSeconds()
+            notifyState("Идёт запись: ${RecCmd.durationLabel(sec)}")
+            Notify.recording(this, sec)
+            overlay?.update("● Пишу звук… ${RecCmd.durationLabel(sec)}")
+        }
+        val gap = Prefs.recGapSec(this)
+        if (gap > 0 && now - recSegmentStart >= gap * 1_000L) openRecGap()
+    }
+
+    /**
+     * Пауза на команду: диктофон отпускает микрофон, распознаватель пару
+     * секунд слушает «стоп запись» (или повтор кодового слова).
+     */
+    private fun openRecGap() {
+        if (!recording || recGapListening) return
+        Recorder.pauseForListening()
+        recGapListening = true
+        mode = Mode.COMMAND
+        lastCallback = System.currentTimeMillis()
+        overlay?.update("Слушаю «стоп запись»…")
+        restartListening(120)
+    }
+
+    /** Пауза закончилась — снова пишем: кусочки потом склеятся в один файл. */
+    private fun closeRecGap() {
+        if (!recording) return
+        recGapListening = false
+        val err = try {
+            Recorder.resume(this)
+        } catch (e: Exception) {
+            e.message?.take(80) ?: "сбой записи"
+        }
+        if (err != null) {
+            finishDictaphone("микрофон не вернулся к записи")
+            return
+        }
+        mode = Mode.RECORD
+        recSegmentStart = System.currentTimeMillis()
+        overlay?.update("● Пишу звук…")
+        notifyState("Идёт запись: ${RecCmd.durationLabel(Recorder.elapsedSeconds())}")
+    }
+
+    /** Остановить запись, сохранить файл и доложить. */
+    private fun finishDictaphone(why: String, then: () -> Unit = {}) {
+        val wasRecording = recording || Recorder.recording
+        recording = false
+        recGapListening = false
+        if (!wasRecording) {
+            then()
+            return
+        }
+        val saved = try {
+            Recorder.stop(this)
+        } catch (e: Exception) {
+            Recorder.Saved(false, error = e.message?.take(80) ?: "сбой сохранения")
+        }
+        if (saved.ok) Notify.recordingSaved(this, saved)
+        val text = when {
+            !saved.ok && saved.error.isNotBlank() -> "Запись не сохранилась, сэр: ${saved.error}"
+            saved.seconds < 1 -> "Звук не записался, сэр: получилось меньше секунды."
+            else -> "Готово, сэр: запись на ${RecCmd.durationLabel(saved.seconds)}, " +
+                "сохранил в ${saved.where}." +
+                (if (why.isNotBlank()) " ($why)" else "")
+        }
+        mode = Mode.WAKE
+        overlay?.autoHide(2_500)
+        if (running) {
+            say(text) {
+                then()
+                backToWake()
+            }
+        } else {
+            then()
+        }
     }
 
     // ------------------------------------------------------------ речь / окна
@@ -763,10 +1016,15 @@ class WakeWordService : Service() {
                     val tail = WakeWords.removeFromText(hitText)
                     onWake(tail.ifBlank { null })
                 } else {
-                    restartListening(150)
+                    onCodeWord(texts)
                 }
             } else {
                 val text = texts?.firstOrNull { !it.isNullOrBlank() }
+                // во время записи это пауза «стоп запись», а не обычная команда
+                if (recGapListening) {
+                    onGapHeard(text)
+                    return
+                }
                 if (text.isNullOrBlank()) {
                     if (waitingFollowUp) {
                         // непрерывный диалог: тишина — просто слушаем дальше
@@ -783,6 +1041,16 @@ class WakeWordService : Service() {
 
         override fun onError(error: Int) {
             lastCallback = System.currentTimeMillis()
+            if (recGapListening) {
+                // в паузе ничего не услышали — возвращаемся к записи
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    finishDictaphone("нет доступа к микрофону")
+                } else {
+                    closeRecGap()
+                }
+                return
+            }
+            if (mode == Mode.RECORD) return   // микрофон у диктофона — ошибки распознавателя не наши
             if (mode == Mode.COMMAND &&
                 (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
             ) {

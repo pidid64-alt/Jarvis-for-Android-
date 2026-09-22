@@ -21,6 +21,7 @@ import android.os.PowerManager
 class AutoSendService : AccessibilityService() {
     private var lastScreenReview = 0L
     private var lastScreenText = ""
+    private var lastDiscordTap = 0L
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -31,6 +32,7 @@ class AutoSendService : AccessibilityService() {
         ) return
         try {
             if (AutoSend.active() && pkg == AutoSend.targetPkg()) tryClickSend()
+            if (DiscordCall.active() && pkg == DiscordCall.targetPkg()) tryTapDiscordCall()
             if (Prefs.screenWatch(this) && pkg != packageName) maybeDiscussScreen()
         } catch (e: Throwable) {
             // не роняем процесс из-за одного странного окна или ответа сети
@@ -54,10 +56,16 @@ class AutoSendService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
-    /** Опциональный режим: не снимает скриншоты, а читает только доступный текст UI. */
+    /**
+     * Опциональный режим: не снимает скриншоты, а читает только доступный текст UI.
+     *
+     * Период задаёт владелец — голосом («смотри на экран каждые 2 минуты») или
+     * в настройках; раньше он был зашит в коде и равнялся пяти минутам.
+     */
     private fun maybeDiscussScreen() {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastScreenReview < 5 * 60_000L) return
+        val everyMin = Prefs.screenWatchMin(this)
+        if (now - lastScreenReview < everyMin * 60_000L) return
         val pm = getSystemService(POWER_SERVICE) as? PowerManager ?: return
         if (!pm.isInteractive || !Llm.ready(this)) return
         val root = rootInActiveWindow ?: return
@@ -88,6 +96,75 @@ class AutoSendService : AccessibilityService() {
         }
         walk(node)
         return out.toString()
+    }
+
+    /**
+     * Discord: после «позвони маме в дискорде» приложение открылось — ищем
+     * кнопку звонка и жмём её. Кнопки Discord подписаны для спец. возможностей
+     * («Start Voice Call» / «Начать голосовой вызов»), поэтому ищем по подписи
+     * и по view-id, а не по картинке.
+     */
+    private fun tryTapDiscordCall() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDiscordTap < 1_200L) return
+        val root = rootInActiveWindow ?: return
+        val video = DiscordCall.wantVideo()
+        val node = findCallButton(root, video)
+        // корневой узел не перерабатываем: им владеет сервис (как и в остальных местах)
+        if (node == null) return
+        lastDiscordTap = now
+        val clicked = node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        try { node.recycle() } catch (e: Exception) { }
+        if (clicked) DiscordCall.markClicked()
+    }
+
+    private fun findCallButton(root: AccessibilityNodeInfo, video: Boolean): AccessibilityNodeInfo? {
+        val own = if (video) listOf("видеовызов", "видео звонок", "видеозвонок", "video call", "start video call")
+        else listOf("голосовой вызов", "начать голосовой", "голосовой звонок", "voice call", "start voice call")
+        val other = if (video) listOf("голосовой вызов", "voice call", "start voice call")
+        else listOf("видеовызов", "video call", "start video call")
+        val common = listOf("позвонить", "звонок", "call", "join", "подключиться", "войти")
+
+        // сначала «своя» кнопка (голос/видео), потом общая, чужая — в последнюю очередь
+        for (group in listOf(own, common)) {
+            val found = search(root) { desc, text, id ->
+                group.any { desc.contains(it) || text.contains(it) || id.contains(it.replace(" ", "_")) }
+            }
+            if (found != null && !isOtherKind(found, other)) return found
+        }
+        return null
+    }
+
+    /** Не перепутать голосовой звонок с видео: «чужая» кнопка не подходит. */
+    private fun isOtherKind(node: AccessibilityNodeInfo, other: List<String>): Boolean {
+        val desc = node.contentDescription?.toString()?.lowercase()?.trim().orEmpty()
+        val text = node.text?.toString()?.lowercase()?.trim().orEmpty()
+        return other.any { desc.contains(it) || text.contains(it) }
+    }
+
+    /** Обход дерева: первый кликабельный узел, подходящий под условие. */
+    private fun search(
+        node: AccessibilityNodeInfo,
+        hit: (desc: String, text: String, id: String) -> Boolean
+    ): AccessibilityNodeInfo? {
+        val desc = node.contentDescription?.toString()?.lowercase()?.trim().orEmpty()
+        val text = node.text?.toString()?.lowercase()?.trim().orEmpty()
+        val id = node.viewIdResourceName?.lowercase().orEmpty()
+        if (node.isClickable && hit(desc, text, id)) return node
+        for (i in 0 until node.childCount) {
+            val ch = try {
+                node.getChild(i)
+            } catch (e: Exception) {
+                null
+            } ?: continue
+            val found = search(ch, hit)
+            if (found != null) {
+                if (found !== ch) ch.recycle()
+                return found
+            }
+            ch.recycle()
+        }
+        return null
     }
 
     /** Ищет кнопку отправки и жмёт её, если текст уже вставлен в поле ввода. */

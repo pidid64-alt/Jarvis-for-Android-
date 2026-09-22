@@ -66,6 +66,17 @@ class SettingsActivity : Activity() {
     private lateinit var swScreenWatch: Switch
     private lateinit var etAutoRules: EditText
 
+    // --- диктофон, кодовое слово и Discord ---
+    private lateinit var spScreenEvery: Spinner
+    private lateinit var swRecWords: Switch
+    private lateinit var etRecWords: EditText
+    private lateinit var spRecLimit: Spinner
+    private lateinit var spRecGap: Spinner
+    private lateinit var swDiscordTap: Switch
+    private lateinit var etDiscordLinks: EditText
+    private lateinit var btnDiscordHands: Button
+    private lateinit var tvDiscordStatus: TextView
+
     /** Своя озвучка — чтобы дать послушать голос прямо в настройках. */
     private var tts: TtsController? = null
 
@@ -118,11 +129,21 @@ class SettingsActivity : Activity() {
         swAutoVoice = findViewById(R.id.swAutoVoice)
         swScreenWatch = findViewById(R.id.swScreenWatch)
         etAutoRules = findViewById(R.id.etAutoRules)
+        spScreenEvery = findViewById(R.id.spScreenEvery)
+        swRecWords = findViewById(R.id.swRecWords)
+        etRecWords = findViewById(R.id.etRecWords)
+        spRecLimit = findViewById(R.id.spRecLimit)
+        spRecGap = findViewById(R.id.spRecGap)
+        swDiscordTap = findViewById(R.id.swDiscordTap)
+        etDiscordLinks = findViewById(R.id.etDiscordLinks)
+        btnDiscordHands = findViewById(R.id.btnDiscordHands)
+        tvDiscordStatus = findViewById(R.id.tvDiscordStatus)
 
         setupVoice()
         setupResearch()
         setupAssistantModes()
         setupExternalActions()
+        setupRecorderDiscord()
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -282,6 +303,7 @@ class SettingsActivity : Activity() {
         refreshAutoDesc()
         refreshAutoSendStatus()
         refreshBgStatus()
+        refreshDiscordStatus()
         if (Prefs.wakeOn(this)) WakeWordService.start(this)
     }
 
@@ -349,6 +371,34 @@ class SettingsActivity : Activity() {
         swScreenWatch.setOnCheckedChangeListener { _, checked ->
             Prefs.setScreenWatch(this, checked)
             Toast.makeText(this, if (checked) "Просмотр экрана включён — нужен доступ «Джарвис — автоотправка»" else "Просмотр экрана выключен", Toast.LENGTH_LONG).show()
+        }
+        // период, который читает экран: выбираем сами, а не «раз в 5 минут из кода»
+        run {
+            val labels = ScreenWatch.STEPS.map { ScreenWatch.label(it) }
+            spScreenEvery.adapter = ArrayAdapter(
+                this, android.R.layout.simple_spinner_item, labels
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            val cur = Prefs.screenWatchMin(this)
+            spScreenEvery.setSelection(ScreenWatch.STEPS.indexOf(cur).coerceAtLeast(0))
+            spScreenEvery.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long
+                ) {
+                    val min = ScreenWatch.STEPS.getOrElse(position) { ScreenWatch.DEFAULT_MIN }
+                    if (min != Prefs.screenWatchMin(this@SettingsActivity)) {
+                        Prefs.setScreenWatchMin(this@SettingsActivity, min)
+                        if (Prefs.screenWatch(this@SettingsActivity)) {
+                            Toast.makeText(
+                                this@SettingsActivity,
+                                "Теперь смотрю на экран " + ScreenWatch.label(min),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
         }
 
         swAuto.setOnCheckedChangeListener { _, checked ->
@@ -425,6 +475,84 @@ class SettingsActivity : Activity() {
                 "При звонке система снова спросит, какой SIM звонить."
             }
             Toast.makeText(this, txt, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Диктофон (своё кодовое слово) и звонки в Discord. */
+    private fun setupRecorderDiscord() {
+        // --- кодовое слово ---
+        val words = Prefs.recWords(this)
+        etRecWords.setText(words.joinToString(", "))
+        swRecWords.isChecked = Prefs.recOn(this) && words.isNotEmpty()
+        swRecWords.setOnCheckedChangeListener { _, checked ->
+            Prefs.setRecOn(this, checked)
+            Toast.makeText(
+                this,
+                if (checked && Prefs.recWords(this).isEmpty()) {
+                    "Впишите ниже хотя бы одно кодовое слово — например «пиши меня»"
+                } else if (checked) "Кодовое слово включено"
+                else "По кодовому слову запись не включается",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
+        // ограничение длины одной записи
+        val limits = listOf(1, 3, 5, 10, 15, 30, 60)
+        spRecLimit.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item,
+            limits.map { RecCmd.limitLabel(it) }
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spRecLimit.setSelection((limits.indexOf(Prefs.recLimitMin(this)).coerceAtLeast(0)))
+        spRecLimit.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long
+            ) {
+                val m = limits.getOrElse(position) { 10 }
+                if (m != Prefs.recLimitMin(this@SettingsActivity)) {
+                    Prefs.setRecLimitMin(this@SettingsActivity, m)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        // как часто открывать микрофон для «стоп запись»
+        val gaps = listOf(15, 30, 45, 60, 120, 0)
+        spRecGap.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item,
+            gaps.map { g -> if (g == 0) "Не слушать (без пауз)" else "Раз в $g сек" }
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spRecGap.setSelection((gaps.indexOf(Prefs.recGapSec(this)).coerceAtLeast(0)))
+        spRecGap.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long
+            ) {
+                val g = gaps.getOrElse(position) { 60 }
+                if (g != Prefs.recGapSec(this@SettingsActivity)) {
+                    Prefs.setRecGapSec(this@SettingsActivity, g)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        // --- Discord ---
+        swDiscordTap.isChecked = Prefs.discordAutoCall(this)
+        swDiscordTap.setOnCheckedChangeListener { _, checked ->
+            Prefs.setDiscordAutoCall(this, checked)
+        }
+        etDiscordLinks.setText(Discord.serialize(Prefs.discordLinks(this)))
+        refreshDiscordStatus()
+        btnDiscordHands.setOnClickListener {
+            safeStart(AutoSend.openSettings(this))
+        }
+    }
+
+    private fun refreshDiscordStatus() {
+        tvDiscordStatus.text = if (AutoSend.enabled(this)) {
+            getString(R.string.auto_send_on)
+        } else {
+            getString(R.string.auto_send_off)
         }
     }
 
@@ -576,6 +704,15 @@ class SettingsActivity : Activity() {
     override fun onPause() {
         saveFields()
         Prefs.setAutoReplyRules(this, etAutoRules.text.toString())
+        // вписанные руками кодовые слова и ссылки Discord
+        try {
+            val newWords = CodeWords.parseList(etRecWords.text.toString())
+            if (newWords != Prefs.recWords(this)) Prefs.setRecWords(this, newWords)
+            val links = Discord.parseAliases(etDiscordLinks.text.toString())
+            if (Discord.serialize(links) != Discord.serialize(Prefs.discordLinks(this))) {
+                Prefs.setDiscordLinks(this, links)
+            }
+        } catch (e: Exception) { }
         super.onPause()
     }
 

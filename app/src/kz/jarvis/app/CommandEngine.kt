@@ -46,6 +46,8 @@ object CommandEngine {
      * @param openApp        открыть окно приложения
      * @param mood           произнести ответ этой интонацией («скажи радостно: …»),
      *                       null — настроение определяется по самому тексту
+     * @param record         действие диктофона: выполнить его должен тот, кто
+     *                       владеет микрофоном (служба или окно приложения)
      */
     data class Outcome(
         val reply: String,
@@ -57,7 +59,8 @@ object CommandEngine {
         val stopWake: Boolean = false,
         val openApp: Boolean = false,
         val endDialog: Boolean = false,
-        val mood: Emotion.Mood? = null
+        val mood: Emotion.Mood? = null,
+        val record: RecCmd.Action? = null
     )
 
     private var torchOn = false
@@ -130,7 +133,7 @@ object CommandEngine {
 
         // ---------- курсы валют и погода (сеть) ----------
         rates(s)?.let { return it }
-        weather(s)?.let { return it }
+        weather(ctx, s)?.let { return it }
 
         // ---------- календарь, время и дата ----------
         dateFacts(s)?.let { return it }
@@ -161,7 +164,11 @@ object CommandEngine {
         // ---------- списки покупок и заметки ----------
         lists(ctx, s)?.let { return it }
 
+        // ---------- диктофон и кодовое слово ----------
+        recorder(ctx, s)?.let { return it }
+
         // ---------- связь ----------
+        discord(ctx, s)?.let { return it }
         waSend(ctx, s)?.let { return it }
         sms(ctx, s)?.let { return it }
         SystemCommands.share(ctx, s)?.let { return it }
@@ -297,6 +304,9 @@ object CommandEngine {
         Regex("списк|покупк|заметк").containsMatchIn(s) -> "lists"
         Regex("голос|тембр|озвуч|эмоци").containsMatchIn(s) -> "voice"
         Regex("презентац|доклад|реферат|поиск инфы|клод|исследован").containsMatchIn(s) -> "research"
+        Regex("погод|прогноз").containsMatchIn(s) -> "weather"
+        Regex("диктофон|запис|кодов").containsMatchIn(s) -> "recorder"
+        Regex("дискорд|discord").containsMatchIn(s) -> "discord"
         else -> null
     }
 
@@ -312,6 +322,9 @@ object CommandEngine {
         "lists" -> listsHelp()
         "voice" -> voiceHelp()
         "research" -> researchHelp()
+        "weather" -> Weather.help()
+        "recorder" -> RecCmd.help()
+        "discord" -> Discord.help()
         else -> """
             Умею, сэр:
             • «включи/выключи фонарик», «фонарик на 10 секунд», «громче/тише», «громкость 40 процентов»
@@ -324,6 +337,10 @@ object CommandEngine {
             • «сколько будет 12 умножить на 7», «20 процентов от 150», «корень из 144»
             • «5 км в милях», «100 фаренгейта в цельсиях», «2 гб в мб», «чаевые 10 процентов от 3500»
             • «курс доллара», «100 долларов в тенге», «какая погода», «погода в Сочи»
+            • «какая погода будет завтра», «прогноз на неделю», «будет ли дождь вечером»
+            • «включи диктофон», «кодовое слово: пиши меня», «стоп запись», «покажи записи»
+            • «открой дискорд», «позвони маме в дискорде», «зайди в голосовой канал общий»
+            • «включи наблюдение за экраном», «смотри на экран каждые 2 минуты»
             • «который час», «время на телефоне», «сколько дней до 31 декабря», «время в Лондоне»
             • «сколько заряда», «сколько памяти», «какой у меня ip», «какой оператор», «разрешение экрана»
             • «включи/выключи шумоподавление», «шумоподавление включено?»
@@ -341,7 +358,8 @@ object CommandEngine {
             • «спи 10 минут», «стоп», «что ты умеешь»
             Подробности по темам: «команды конвертера», «команды телефона», «календарные команды»,
             «команды для текста», «команды-развлечения», «команды списков», «курсы валют»,
-            «команды голоса», «команды презентаций».
+            «команды голоса», «команды презентаций», «команды погоды»,
+            «команды диктофона», «команды дискорда».
             На всё остальное отвечу своими словами — провайдера ИИ (Gemini, OpenAI,
             OpenRouter, DeepSeek, Groq, Mistral, Claude или локальную Ollama) выбираете
             сами: «смени провайдера».
@@ -524,6 +542,7 @@ object CommandEngine {
         dialogCmd(ctx, s)?.let { return it }
         autoReplyCmd(ctx, s)?.let { return it }
         autoSendCmd(ctx, s)?.let { return it }
+        screenWatchCmd(ctx, s)?.let { return it }
 
         Regex("(?:спи|спать|помолчи|отдохни|пауза|замолчи)\\s+(\\d+)\\s*(секунд[а-яa-z0-9]*|минут[а-яa-z0-9]*|час[а-яa-z0-9]*)?")
             .find(s)?.let { m ->
@@ -770,6 +789,54 @@ object CommandEngine {
         return Outcome("Автоотправка в WhatsApp сейчас $status, сэр. «Включи автоотправку» — открою нужные настройки.")
     }
 
+    // -------------------------------------------------- наблюдение за экраном
+
+    /**
+     * «Включи наблюдение за экраном», «смотри на экран чаще»,
+     * «смотри на экран каждые 2 минуты», «как часто ты смотришь на экран».
+     *
+     * Период больше не зашит в коде: владелец сам говорит, как часто читать
+     * экран (см. [ScreenWatch] и [AutoSendService]).
+     */
+    private fun screenWatchCmd(ctx: Context, s: String): Outcome? {
+        val about = ScreenWatch.isAbout(s) ||
+            Regex("наблюдение за экраном|анализ экрана|читаешь экран|следишь за экраном").containsMatchIn(s)
+        if (!about) return null
+        val current = Prefs.screenWatchMin(ctx)
+
+        fun turnOn(minutes: Int, what: String): Outcome {
+            Prefs.setScreenWatch(ctx, true)
+            Prefs.setScreenWatchMin(ctx, minutes)
+            val set = Prefs.screenWatchMin(ctx)
+            val hands = try {
+                AutoSend.enabled(ctx)
+            } catch (e: Exception) {
+                false
+            }
+            val reply = "$what, сэр: смотрю на экран ${ScreenWatch.label(set)} и могу сам " +
+                "заговорить по теме." +
+                if (hands) "" else " Но нужен сервис спец. возможностей — включите " +
+                    "«Джарвис — автоотправка» (открываю список)."
+            return Outcome(reply, if (hands) null else AutoSend.openSettings(ctx))
+        }
+
+        ScreenWatch.interval(s)?.let { want ->
+            return turnOn(want, "Принял")
+        }
+        ScreenWatch.adjust(s)?.let { dir ->
+            return turnOn(ScreenWatch.shifted(current, dir), if (dir < 0) "Буду смотреть чаще" else "Буду смотреть реже")
+        }
+        ScreenWatch.onOff(s)?.let { on ->
+            return if (on) {
+                turnOn(current, "Наблюдение за экраном включено")
+            } else {
+                Prefs.setScreenWatch(ctx, false)
+                Outcome("Больше не смотрю на экран, сэр.")
+            }
+        }
+        return Outcome(ScreenWatch.statusText(Prefs.screenWatch(ctx), current))
+    }
+
     // ------------------------------------------------------ напоминания
 
     private fun reminder(ctx: Context, s: String): Outcome? {
@@ -982,9 +1049,123 @@ object CommandEngine {
         return null
     }
 
+    // ---------------------------------------------------------- диктофон
+
+    /**
+     * Диктофон и своё кодовое слово.
+     *
+     * Само действие (включить/остановить микрофон) выполняет тот, кто держит
+     * микрофон — фоновая служба или окно приложения: они получают его через
+     * [Outcome.record]. Здесь — разбор команды и ответы.
+     */
+    private fun recorder(ctx: Context, s: String): Outcome? {
+        val cmd = RecCmd.parse(s) ?: return null
+        val words = Prefs.recWords(ctx)
+        val limit = Prefs.recLimitMin(ctx)
+        return when (cmd.action) {
+            RecCmd.Action.START ->
+                if (Recorder.recording) {
+                    Outcome(
+                        "Запись уже идёт, сэр: ${RecCmd.durationLabel(Recorder.elapsedSeconds())}. " +
+                            "Скажите «стоп запись», чтобы сохранить."
+                    )
+                } else {
+                    Outcome(
+                        "Пишу, сэр. Остановите фразой «стоп запись» — или кнопкой в уведомлении.",
+                        endDialog = true,
+                        record = RecCmd.Action.START
+                    )
+                }
+
+            RecCmd.Action.STOP ->
+                if (Recorder.recording) {
+                    Outcome("", silent = true, record = RecCmd.Action.STOP)
+                } else {
+                    Outcome("Запись не идёт, сэр.")
+                }
+
+            RecCmd.Action.SET_WORD -> {
+                val word = cmd.word.orEmpty()
+                val err = CodeWords.validate(word)
+                if (err != null) {
+                    Outcome(err)
+                } else {
+                    Prefs.setRecWords(ctx, (words + CodeWords.normalize(word)).distinct())
+                    Prefs.setRecOn(ctx, true)
+                    Outcome(
+                        "Принято, сэр: кодовое слово «$word». Услышу его — включу диктофон, " +
+                            "даже когда приложение закрыто. Скажете его ещё раз — остановлю запись. " +
+                            "Одна запись не длиннее ${RecCmd.limitLabel(limit)}."
+                    )
+                }
+            }
+
+            RecCmd.Action.CLEAR_WORD -> {
+                Prefs.setRecWords(ctx, emptyList())
+                Outcome("Кодовое слово забыто, сэр. Диктофон остался по команде «включи диктофон».")
+            }
+
+            RecCmd.Action.ENABLE ->
+                if (words.isEmpty()) {
+                    Outcome("Сначала задайте кодовое слово, сэр: «кодовое слово: пиши меня».")
+                } else {
+                    Prefs.setRecOn(ctx, true)
+                    Outcome("Слушаю кодовое слово «${words.joinToString("», «")}», сэр.")
+                }
+
+            RecCmd.Action.DISABLE -> {
+                Prefs.setRecOn(ctx, false)
+                Outcome("На кодовое слово больше не реагирую, сэр. Диктофон — по команде «включи диктофон».")
+            }
+
+            RecCmd.Action.LIMIT -> {
+                val m = cmd.minutes
+                if (m <= 0) Outcome("Сколько минут писать, сэр? Например: «запись максимум 5 минут».")
+                else {
+                    Prefs.setRecLimitMin(ctx, m)
+                    Outcome("Одна запись — не длиннее ${RecCmd.limitLabel(Prefs.recLimitMin(ctx))}, сэр.")
+                }
+            }
+
+            RecCmd.Action.STATUS ->
+                Outcome(
+                    RecCmd.status(
+                        words = words,
+                        enabled = Prefs.recOn(ctx) && words.isNotEmpty(),
+                        limitMin = limit,
+                        recording = Recorder.recording,
+                        elapsedSec = Recorder.elapsedSeconds()
+                    )
+                )
+
+            RecCmd.Action.LIST -> Outcome(Recorder.list(ctx))
+
+            RecCmd.Action.PLAY_LAST -> {
+                val (reply, intent) = Recorder.playLast(ctx)
+                Outcome(reply, intent?.withTask(ctx), endDialog = intent != null)
+            }
+
+            RecCmd.Action.DELETE_LAST -> Outcome(Recorder.deleteLast(ctx))
+        }
+    }
+
     // ------------------------------------------------------------ погода
 
-    private fun weather(s: String): Outcome? {
+    /**
+     * Погода: «какая погода» — что за окном сейчас, «какая погода будет
+     * завтра» / «прогноз на неделю» — прогноз наперёд (см. [Forecast]).
+     */
+    private fun weather(ctx: Context, s: String): Outcome? {
+        val ahead = Forecast.parse(s)
+        if (ahead != null) {
+            val head = when {
+                ahead.days > 1 -> "Смотрю прогноз на ${Forecast.pluralDays(ahead.days)}, сэр…"
+                ahead.offset > 0 -> "Смотрю прогноз на ${Forecast.labelFor(ahead.offset)}, сэр…"
+                ahead.part != null -> "Смотрю, что будет ${ahead.part.label}, сэр…"
+                else -> "Смотрю прогноз, сэр…"
+            }
+            return Outcome(reply = head, async = { c, done -> done(Weather.forecast(c, ahead)) })
+        }
         if (!Regex("погод[а-яa-z0-9]*|какая температура|температур[а-яa-z0-9]* на улице|что за окном").containsMatchIn(s)) return null
         val city = Regex("(?:в|на)\\s+([\\p{L}][\\p{L}\\s-]{2,30})\\s*$").find(s)
             ?.groupValues?.get(1)?.trim()?.takeIf { it.length >= 3 }
@@ -1786,6 +1967,89 @@ object CommandEngine {
             }
         }
         return null
+    }
+
+    // --------------------------------------------------------------- Discord
+
+    /**
+     * «Открой дискорд», «позвони маме в дискорде», «зайди в голосовой канал
+     * общий», «запомни канал дискорд общий https://discord.gg/…».
+     *
+     * Discord не даёт сторонним приложениям начать звонок самим, поэтому
+     * Джарвис открывает нужный чат/канал и (если включён сервис спец.
+     * возможностей) сам нажимает кнопку звонка — см. [DiscordCall].
+     */
+    private fun discord(ctx: Context, s: String): Outcome? {
+        var cmd = Discord.parse(s)
+        if (cmd == null) {
+            // «зайти в голосовой канал общий» — без слова «дискорд»: берём только
+            // если фраза про канал/войс и «общий» — имя сохранённой ссылки
+            val aliases = Prefs.discordLinks(ctx)
+            if (aliases.isNotEmpty() && Regex("канал|войс|голосов|созвон|позвон").containsMatchIn(s)) {
+                val hit = aliases.firstOrNull {
+                    s.contains(CodeWords.normalize(it.name)) || CodeWords.matches(it.name, s)
+                }
+                if (hit != null) cmd = Discord.Cmd(Discord.Kind.CHANNEL, who = hit.name, link = hit.link)
+            }
+        }
+        cmd ?: return null
+
+        // сохранённые ссылки владелец правит голосом — ничего не зашито
+        if (cmd.kind == Discord.Kind.ALIAS_ADD) {
+            val a = cmd.alias ?: return Outcome("Не разобрал ссылку Discord, сэр.")
+            Prefs.addDiscordLink(ctx, a)
+            return Outcome(
+                "Запомнил, сэр: «${a.name}». Теперь говорите «зайди в канал ${a.name}» " +
+                    "или «позвони ${a.name} в дискорде»."
+            )
+        }
+        if (cmd.kind == Discord.Kind.ALIAS_LIST) {
+            return Outcome(Discord.listText(Prefs.discordLinks(ctx)))
+        }
+        if (cmd.kind == Discord.Kind.ALIAS_REMOVE) {
+            val name = cmd.who.orEmpty()
+            val before = Prefs.discordLinks(ctx).size
+            Prefs.removeDiscordLink(ctx, name)
+            val now = Prefs.discordLinks(ctx)
+            return Outcome(
+                if (now.size < before) "Убрал «$name» из ссылок Discord, сэр."
+                else "Не нашёл ссылку «$name», сэр. " + Discord.listText(now)
+            )
+        }
+
+        val hands = try {
+            AutoSend.enabled(ctx)
+        } catch (e: Exception) {
+            false
+        }
+        val plan = DiscordCall.planFor(
+            ctx, cmd,
+            aliases = Prefs.discordLinks(ctx),
+            handsEnabled = hands,
+            autoTap = Prefs.discordAutoCall(ctx)
+        )
+        plan.clipboard?.let { DiscordCall.copy(ctx, it) }
+        val pkg = DiscordCall.installed(ctx)
+        val tapKind = plan.tap
+        val armed = tapKind != null && pkg != null
+        if (tapKind != null && pkg != null) DiscordCall.arm(pkg, tapKind)
+
+        if (!armed) {
+            return Outcome(plan.reply, plan.intent?.withTask(ctx), endDialog = plan.intent != null)
+        }
+        // ждём, пока сервис спец. возможностей нажмёт кнопку звонка
+        return Outcome(
+            plan.reply,
+            plan.intent?.withTask(ctx),
+            endDialog = true,
+            async = { _, done ->
+                val ok = DiscordCall.waitResult()
+                done(
+                    if (ok) "Звонок в Discord начался, сэр."
+                    else "Discord открыт, но кнопку звонка найти не смог — нажмите её сами, сэр."
+                )
+            }
+        )
     }
 
     // --------------------------------------------- отправка в WhatsApp голосом
