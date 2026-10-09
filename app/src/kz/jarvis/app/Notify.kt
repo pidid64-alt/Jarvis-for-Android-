@@ -26,6 +26,15 @@ object Notify {
         wake.setShowBadge(false)
         nm.createNotificationChannel(wake)
 
+        val wifi = NotificationChannel(
+            OpenWifiService.CH_ID,
+            "Автоподключение к публичному Wi‑Fi",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        wifi.description = "Поиск сетей без пароля, когда у телефона пропал интернет"
+        wifi.setShowBadge(false)
+        nm.createNotificationChannel(wifi)
+
         val rem = NotificationChannel(
             CH_REMINDERS,
             "Напоминания",

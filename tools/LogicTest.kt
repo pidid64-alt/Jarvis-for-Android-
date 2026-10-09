@@ -6,8 +6,10 @@ import kz.jarvis.app.ChatMedia
 import kz.jarvis.app.DateFacts
 import kz.jarvis.app.Deck
 import kz.jarvis.app.Emotion
+import kz.jarvis.app.Energy
 import kz.jarvis.app.LifeCalc
 import kz.jarvis.app.LlmRequests
+import kz.jarvis.app.OpenWifiLogic
 import kz.jarvis.app.Persona
 import kz.jarvis.app.Providers
 import kz.jarvis.app.MathEngine
@@ -639,6 +641,107 @@ fun main() {
     check("местный 10 цифр", "77712345678", ChatMedia.phoneForWa("7712345678"))
     check("сломанный номер", null, ChatMedia.phoneForWa("номер не найден"))
     check("пусто", null, ChatMedia.phoneForWa(""))
+
+    println("== Энергопотребление ==")
+    check("по умолчанию сбалансированный", Energy.Mode.BALANCED, Energy.Mode.DEFAULT)
+    check("неизвестный режим — сбалансированный", Energy.Mode.BALANCED, Energy.Mode.byId(99))
+    check("сбалансированный, экран включён", 300L,
+        Energy.wakeRestartDelayMs(Energy.Mode.BALANCED, true, false, false))
+    check("сбалансированный, экран выключен", 1_500L,
+        Energy.wakeRestartDelayMs(Energy.Mode.BALANCED, false, false, false))
+    check("на зарядке без пауз", 150L,
+        Energy.wakeRestartDelayMs(Energy.Mode.BALANCED, false, true, false))
+    check("системная экономия усиливает паузу", 4_000L,
+        Energy.wakeRestartDelayMs(Energy.Mode.BALANCED, false, false, true))
+    check("экономный режим", 6_000L,
+        Energy.wakeRestartDelayMs(Energy.Mode.SAVER, false, false, false))
+    check("экономный + системная экономия", 8_000L,
+        Energy.wakeRestartDelayMs(Energy.Mode.SAVER, false, false, true))
+    check("максимальная отзывчивость", 150L,
+        Energy.wakeRestartDelayMs(Energy.Mode.RESPONSIVE, false, false, false))
+    check("Wi-Fi backoff 1", 5 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.BALANCED, 1, false))
+    check("Wi-Fi backoff 2", 10 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.BALANCED, 2, false))
+    check("Wi-Fi backoff максимум", 30 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.BALANCED, 20, false))
+    check("Wi-Fi в системной экономии", 30 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.BALANCED, 1, true))
+    check("Wi-Fi нашёл сеть — ждёт Android", 15 * 60_000L,
+        Energy.wifiFoundRetryMs(Energy.Mode.BALANCED, false))
+    check("Wi-Fi ноль промахов ограничен первым", 5 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.BALANCED, 0, false))
+    check("отзывчивый Wi-Fi начинает с двух минут", 2 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.RESPONSIVE, 1, false))
+    check("отзывчивый Wi-Fi имеет верхнюю границу", 15 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.RESPONSIVE, 99, false))
+    check("экономный Wi-Fi начинает с 10 минут", 10 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.SAVER, 1, false))
+    check("экономный Wi-Fi имеет верхнюю границу", 60 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.SAVER, 99, false))
+    check("отзывчивый Wi-Fi при системной экономии", 10 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.RESPONSIVE, 1, true))
+    check("отзывчивый Wi-Fi после находки", 5 * 60_000L,
+        Energy.wifiFoundRetryMs(Energy.Mode.RESPONSIVE, false))
+    check("экономный Wi-Fi после находки", 30 * 60_000L,
+        Energy.wifiFoundRetryMs(Energy.Mode.SAVER, false))
+    check("экономный Wi-Fi после находки + power saver", 30 * 60_000L,
+        Energy.wifiFoundRetryMs(Energy.Mode.SAVER, true))
+    check("экономный Wi-Fi при системной экономии", 60 * 60_000L,
+        Energy.wifiEmptyRetryMs(Energy.Mode.SAVER, 1, true))
+
+    println("== Публичный Wi-Fi без пароля ==")
+    check("открытая сеть", OpenWifiLogic.Security.OPEN,
+        OpenWifiLogic.security("[ESS]"))
+    check("WPA2-PSK защищена", OpenWifiLogic.Security.PROTECTED,
+        OpenWifiLogic.security("[WPA2-PSK-CCMP][ESS]"))
+    check("WPA3-SAE защищена", OpenWifiLogic.Security.PROTECTED,
+        OpenWifiLogic.security("[RSN-SAE-CCMP][ESS]"))
+    check("Enterprise EAP защищена", OpenWifiLogic.Security.PROTECTED,
+        OpenWifiLogic.security("[RSN-EAP/SHA1-CCMP][ESS]"))
+    check("WEP защищена", OpenWifiLogic.Security.PROTECTED,
+        OpenWifiLogic.security("[WEP][ESS]"))
+    check("необычный WPA-NONE не считается открытым", OpenWifiLogic.Security.PROTECTED,
+        OpenWifiLogic.security("[WPA-NONE-TKIP][IBSS]"))
+    check("WPS не считается открытым", OpenWifiLogic.Security.PROTECTED,
+        OpenWifiLogic.security("[WPS][ESS]"))
+    check("OWE без пароля и шифруется", OpenWifiLogic.Security.ENHANCED_OPEN,
+        OpenWifiLogic.security("[RSN-OWE-CCMP][ESS]"))
+
+    val wifiCandidates = OpenWifiLogic.candidates(listOf(
+        OpenWifiLogic.Seen("Cafe", "[ESS]", -62),
+        OpenWifiLogic.Seen("Cafe", "[ESS]", -45),
+        OpenWifiLogic.Seen("Office", "[WPA2-PSK-CCMP][ESS]", -20),
+        OpenWifiLogic.Seen("SafeCafe", "[RSN-OWE-CCMP][ESS]", -49),
+        OpenWifiLogic.Seen("", "[ESS]", -10),
+        OpenWifiLogic.Seen("<unknown ssid>", "[ESS]", -5)
+    ))
+    check("защищённая сеть отсеяна", false, wifiCandidates.any { it.ssid == "Office" })
+    check("дубли SSID объединены", 1, wifiCandidates.count { it.ssid == "Cafe" })
+    check("у дубля взят сильный сигнал", -45, wifiCandidates.first { it.ssid == "Cafe" }.level)
+    check("OWE получает небольшой приоритет", "SafeCafe", wifiCandidates.first().ssid)
+    check("скрытый SSID не используется", false, wifiCandidates.any { it.ssid.isBlank() })
+    check("заблокированная сеть пропущена", emptyList<OpenWifiLogic.Candidate>(),
+        OpenWifiLogic.candidates(
+            listOf(OpenWifiLogic.Seen("Cafe", "[ESS]", -30)),
+            blockedSsids = setOf("Cafe")
+        ))
+    val encodedWifi = OpenWifiLogic.encode(OpenWifiLogic.Candidate("Free:WiFi", -40, true))
+    check("тип предложения сохраняется", true, OpenWifiLogic.decode(encodedWifi)?.enhancedOpen)
+    check("SSID предложения сохраняется", "Free:WiFi", OpenWifiLogic.decode(encodedWifi)?.ssid)
+    check("кавычки SSID экранируются", "\"Cafe \\\"24\\\"\"",
+        OpenWifiLogic.quotedSsid("Cafe \"24\""))
+
+    check("команда включить бесплатный Wi-Fi", OpenWifiLogic.Command.ENABLE,
+        OpenWifiLogic.command("включи автоподключение к бесплатному вайфаю"))
+    check("команда найти сеть без пароля", OpenWifiLogic.Command.SCAN,
+        OpenWifiLogic.command("найди вайфай без пароля"))
+    check("команда выключить открытые сети", OpenWifiLogic.Command.DISABLE,
+        OpenWifiLogic.command("выключи автоподключение к открытым сетям"))
+    check("статус публичного Wi-Fi", OpenWifiLogic.Command.STATUS,
+        OpenWifiLogic.command("автоподключение к бесплатному wifi работает?"))
+    check("обычное включение Wi-Fi не перехвачено", null,
+        OpenWifiLogic.command("включи вайфай"))
 
     println("== Эмоции: настроение ответа ==")
     check("радость", Emotion.Mood.JOY, Emotion.detect("Готово, сэр! Презентация сохранена."))

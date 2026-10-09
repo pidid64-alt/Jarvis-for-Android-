@@ -110,6 +110,7 @@ class MainActivity : Activity() {
         handleWakeIntent(intent)
         refreshWakeIcon()
         ensureWakeService()
+        if (Prefs.openWifiOn(this)) OpenWifiService.start(this)
     }
 
     override fun onNewIntent(intent: Intent) {

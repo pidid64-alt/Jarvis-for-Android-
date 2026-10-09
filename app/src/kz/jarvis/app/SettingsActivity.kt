@@ -2,7 +2,10 @@ package kz.jarvis.app
 
 import android.Manifest
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -22,6 +25,11 @@ import android.widget.Toast
 
 class SettingsActivity : Activity() {
 
+    companion object {
+        const val EXTRA_OPEN_WIFI_SETUP = "open_wifi_setup"
+        private const val REQ_OPEN_WIFI = 26
+    }
+
     private lateinit var spProvider: Spinner
     private lateinit var tvProviderDesc: TextView
     private lateinit var etBaseUrl: EditText
@@ -33,6 +41,8 @@ class SettingsActivity : Activity() {
     private lateinit var swWake: Switch
     private lateinit var swNoise: Switch
     private lateinit var tvNoiseDesc: TextView
+    private lateinit var spEnergy: Spinner
+    private lateinit var tvEnergyDesc: TextView
     private lateinit var tvBgStatus: TextView
 
     // --- голос ---
@@ -60,6 +70,15 @@ class SettingsActivity : Activity() {
     private lateinit var btnAutoSend: Button
     private lateinit var tvAutoSendStatus: TextView
     private lateinit var swCallSim: Switch
+
+    // --- восстановление интернета через Wi‑Fi без пароля ---
+    private lateinit var swOpenWifi: Switch
+    private lateinit var tvOpenWifiStatus: TextView
+    private lateinit var btnOpenWifiScan: Button
+    private lateinit var btnOpenWifiPanel: Button
+    private var syncingOpenWifi = false
+    private var openWifiReceiverRegistered = false
+
     private lateinit var swAutoScreen: Switch
     private lateinit var swAutoLoc: Switch
     private lateinit var swAutoVoice: Switch
@@ -74,6 +93,12 @@ class SettingsActivity : Activity() {
 
     /** Провайдер, чьи настройки сейчас показаны в полях. */
     private var activeProvider: Providers.Provider? = null
+
+    private val openWifiStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == OpenWifiService.ACTION_STATE_CHANGED) refreshOpenWifiStatus()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +115,8 @@ class SettingsActivity : Activity() {
         swWake = findViewById(R.id.swWake)
         swNoise = findViewById(R.id.swNoise)
         tvNoiseDesc = findViewById(R.id.tvNoiseDesc)
+        spEnergy = findViewById(R.id.spEnergy)
+        tvEnergyDesc = findViewById(R.id.tvEnergyDesc)
         tvBgStatus = findViewById(R.id.tvBgStatus)
         spVoice = findViewById(R.id.spVoice)
         tvVoiceDesc = findViewById(R.id.tvVoiceDesc)
@@ -113,16 +140,22 @@ class SettingsActivity : Activity() {
         btnAutoSend = findViewById(R.id.btnAutoSend)
         tvAutoSendStatus = findViewById(R.id.tvAutoSendStatus)
         swCallSim = findViewById(R.id.swCallSim)
+        swOpenWifi = findViewById(R.id.swOpenWifi)
+        tvOpenWifiStatus = findViewById(R.id.tvOpenWifiStatus)
+        btnOpenWifiScan = findViewById(R.id.btnOpenWifiScan)
+        btnOpenWifiPanel = findViewById(R.id.btnOpenWifiPanel)
         swAutoScreen = findViewById(R.id.swAutoScreen)
         swAutoLoc = findViewById(R.id.swAutoLoc)
         swAutoVoice = findViewById(R.id.swAutoVoice)
         swScreenWatch = findViewById(R.id.swScreenWatch)
         etAutoRules = findViewById(R.id.etAutoRules)
 
+        setupEnergy()
         setupVoice()
         setupResearch()
         setupAssistantModes()
         setupExternalActions()
+        setupOpenWifi()
 
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -273,6 +306,28 @@ class SettingsActivity : Activity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        try {
+            val filter = IntentFilter(OpenWifiService.ACTION_STATE_CHANGED)
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(openWifiStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(openWifiStateReceiver, filter)
+            }
+            openWifiReceiverRegistered = true
+        } catch (_: Exception) { }
+    }
+
+    override fun onStop() {
+        if (openWifiReceiverRegistered) {
+            try { unregisterReceiver(openWifiStateReceiver) } catch (_: Exception) { }
+            openWifiReceiverRegistered = false
+        }
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         swWake.isChecked = Prefs.wakeOn(this)
@@ -281,8 +336,10 @@ class SettingsActivity : Activity() {
         refreshNoiseStatus()
         refreshAutoDesc()
         refreshAutoSendStatus()
+        refreshOpenWifiStatus()
         refreshBgStatus()
         if (Prefs.wakeOn(this)) WakeWordService.start(this)
+        if (Prefs.openWifiOn(this)) OpenWifiService.start(this)
     }
 
     /** Строка-статус под переключателем: что реально работает на этом устройстве. */
@@ -426,6 +483,127 @@ class SettingsActivity : Activity() {
             }
             Toast.makeText(this, txt, Toast.LENGTH_LONG).show()
         }
+    }
+
+    // --------------------------------------------- публичный Wi‑Fi без пароля
+
+    private fun setupOpenWifi() {
+        refreshOpenWifiStatus()
+
+        swOpenWifi.setOnCheckedChangeListener { _, checked ->
+            if (syncingOpenWifi) return@setOnCheckedChangeListener
+            if (checked) {
+                // До согласия тумблер не считаем включённым.
+                syncingOpenWifi = true
+                swOpenWifi.isChecked = false
+                syncingOpenWifi = false
+                showOpenWifiWarning()
+            } else {
+                OpenWifiService.disable(this)
+                refreshOpenWifiStatus()
+                Toast.makeText(this, "Автоподключение к открытым сетям выключено", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        btnOpenWifiScan.setOnClickListener {
+            if (!Prefs.openWifiOn(this)) {
+                showOpenWifiWarning()
+                return@setOnClickListener
+            }
+            if (!OpenWifiService.permissionsGranted(this)) {
+                requestOpenWifiPermissions()
+                return@setOnClickListener
+            }
+            if (!OpenWifiService.locationEnabled(this)) {
+                Toast.makeText(
+                    this,
+                    "Включите геолокацию — Android скрывает без неё список Wi‑Fi",
+                    Toast.LENGTH_LONG
+                ).show()
+                safeStart(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                return@setOnClickListener
+            }
+            OpenWifiService.scanNow(this)
+            Toast.makeText(this, "Проверяю открытые сети рядом…", Toast.LENGTH_SHORT).show()
+        }
+
+        btnOpenWifiPanel.setOnClickListener {
+            val i = if (Build.VERSION.SDK_INT >= 29) {
+                Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+            } else {
+                Intent(Settings.ACTION_WIFI_SETTINGS)
+            }
+            safeStart(i)
+        }
+
+        // Сюда ведут уведомление службы и голосовая команда настройки.
+        if (intent.getBooleanExtra(EXTRA_OPEN_WIFI_SETUP, false)) {
+            intent.removeExtra(EXTRA_OPEN_WIFI_SETUP)
+            swOpenWifi.post {
+                if (Prefs.openWifiOn(this)) OpenWifiService.scanNow(this)
+                else showOpenWifiWarning()
+            }
+        }
+    }
+
+    private fun showOpenWifiWarning() {
+        if (isFinishing) return
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.open_wifi_warning_title)
+            .setMessage(R.string.open_wifi_warning)
+            .setNegativeButton("Отмена") { _, _ -> refreshOpenWifiStatus() }
+            .setPositiveButton(R.string.open_wifi_accept) { _, _ -> requestOpenWifiPermissions() }
+            .setOnCancelListener { refreshOpenWifiStatus() }
+            .show()
+    }
+
+    private fun requestOpenWifiPermissions() {
+        val permissions = OpenWifiService.missingPermissions(this).toMutableList()
+        // Уведомление показывает, какую сеть выбрал Джарвис, и даёт быстро
+        // выключить режим. Сам поиск может работать и при отказе от уведомлений.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissions += Manifest.permission.POST_NOTIFICATIONS
+        }
+        if (permissions.isEmpty()) {
+            enableOpenWifi()
+        } else {
+            requestPermissions(permissions.distinct().toTypedArray(), REQ_OPEN_WIFI)
+        }
+    }
+
+    private fun enableOpenWifi() {
+        if (!OpenWifiService.permissionsGranted(this)) {
+            refreshOpenWifiStatus()
+            Toast.makeText(
+                this,
+                "Без точной геолокации и доступа к устройствам поблизости Android не отдаёт список Wi‑Fi",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        Prefs.setOpenWifiOn(this, true)
+        Prefs.setOpenWifiStatus(this, "Проверяю, есть ли у телефона интернет…")
+        OpenWifiService.start(this)
+        OpenWifiService.scanNow(this)
+        refreshOpenWifiStatus()
+        Toast.makeText(
+            this,
+            if (Build.VERSION.SDK_INT >= 29)
+                "Включено. При первом найденном Wi‑Fi подтвердите системный запрос Android один раз."
+            else
+                "Включено. При потере интернета Джарвис подключится к открытой сети сам.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    private fun refreshOpenWifiStatus() {
+        if (!::swOpenWifi.isInitialized) return
+        syncingOpenWifi = true
+        swOpenWifi.isChecked = Prefs.openWifiOn(this)
+        syncingOpenWifi = false
+        tvOpenWifiStatus.text = OpenWifiService.status(this)
     }
 
     /** Статус сервиса автоотправки (спец. возможности). */
@@ -577,6 +755,39 @@ class SettingsActivity : Activity() {
         saveFields()
         Prefs.setAutoReplyRules(this, etAutoRules.text.toString())
         super.onPause()
+    }
+
+    // ---------------------------------------------------------- расход батареи
+
+    private fun setupEnergy() {
+        spEnergy.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            Energy.Mode.values().map { it.title }
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spEnergy.setSelection(Prefs.energyMode(this).id)
+        refreshEnergyDesc()
+        spEnergy.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+                val chosen = Energy.Mode.byId(pos)
+                if (chosen == Prefs.energyMode(this@SettingsActivity)) return
+                Prefs.setEnergyMode(this@SettingsActivity, chosen)
+                refreshEnergyDesc()
+                WakeWordService.energyChanged(this@SettingsActivity)
+                OpenWifiService.energyChanged(this@SettingsActivity)
+                Toast.makeText(
+                    this@SettingsActivity,
+                    "Режим батареи: ${chosen.title.lowercase()}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+    }
+
+    private fun refreshEnergyDesc() {
+        tvEnergyDesc.text = getString(R.string.energy_desc) + "\n\n" + Prefs.energyMode(this).hint
     }
 
     // ------------------------------------------------------------------ голос
@@ -791,8 +1002,21 @@ class SettingsActivity : Activity() {
                     Toast.LENGTH_LONG
                 ).show()
             }
+            REQ_OPEN_WIFI -> {
+                if (OpenWifiService.permissionsGranted(this)) {
+                    enableOpenWifi()
+                } else {
+                    Prefs.setOpenWifiOn(this, false)
+                    Toast.makeText(
+                        this,
+                        "Автоподключение не включено: разрешите точную геолокацию и устройства поблизости",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
         refreshBgStatus()
         refreshAutoDesc()
+        refreshOpenWifiStatus()
     }
 }

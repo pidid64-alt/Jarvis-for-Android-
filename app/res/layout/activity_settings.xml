@@ -234,6 +234,34 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- Энергопотребление фоновых служб -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/energy_title"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/spEnergy"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_input"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp" />
+
+        <TextView
+            android:id="@+id/tvEnergyDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/energy_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
         <!-- Шумоподавление -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -853,6 +881,81 @@
                 android:id="@+id/swCallSim"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- Автовосстановление интернета через Wi‑Fi без пароля -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="@string/open_wifi_title"
+            android:textColor="@color/cyan"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="10dp"
+            android:text="@string/open_wifi_desc"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/open_wifi_master"
+                android:textColor="@color/text_main"
+                android:textSize="15sp" />
+
+            <Switch
+                android:id="@+id/swOpenWifi"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvOpenWifiStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_card"
+            android:padding="10dp"
+            android:textColor="@color/text_main"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/btnOpenWifiScan"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:backgroundTint="@color/panel_light"
+                android:text="@string/open_wifi_scan"
+                android:textColor="@color/cyan" />
+
+            <Button
+                android:id="@+id/btnOpenWifiPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:backgroundTint="@color/panel_light"
+                android:text="@string/open_wifi_panel"
+                android:textColor="@color/cyan" />
         </LinearLayout>
 
         <!-- Фоновый режим -->

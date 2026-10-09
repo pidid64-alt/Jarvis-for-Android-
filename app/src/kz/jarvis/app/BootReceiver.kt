@@ -26,6 +26,14 @@ class BootReceiver : BroadcastReceiver() {
         // Напоминания и таймеры AlarmManager забывает после перезагрузки.
         try { ReminderScheduler.restore(context) } catch (e: Exception) { }
 
+        // Wi‑Fi-службе не нужен микрофон, поэтому Android разрешает вернуть её
+        // после загрузки отдельно от голосовой активации. При LOCKED_BOOT
+        // обычные SharedPreferences ещё могут быть недоступны — тогда повторит
+        // BOOT_COMPLETED после разблокировки.
+        try {
+            if (Prefs.openWifiOn(context)) OpenWifiService.start(context)
+        } catch (_: Exception) { }
+
         if (!Prefs.wakeOn(context)) return
 
         WakeWordService.start(context)   // сработает, если система разрешит

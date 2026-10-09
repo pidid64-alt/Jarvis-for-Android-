@@ -9,12 +9,19 @@ object Prefs {
     private const val K_TTS = "tts_on"
     private const val K_WAKE = "wake_on"
     private const val K_NOISE = "noise_suppressor"
+    private const val K_ENERGY = "energy_mode"
     private const val K_HELLO = "said_hello"
     private const val K_SNOOZE = "snooze_until"
     private const val K_BOOT_HINT = "boot_hint_shown"
 
     // непрерывный диалог
     private const val K_FOLLOW = "follow_up"
+
+    // восстановление интернета через публичный Wi‑Fi без пароля
+    private const val K_OPEN_WIFI = "open_wifi_auto"
+    private const val K_OPEN_WIFI_STATUS = "open_wifi_status"
+    private const val K_OPEN_WIFI_SUGGESTIONS = "open_wifi_suggestions"
+    private const val K_OPEN_WIFI_LEGACY = "open_wifi_legacy_networks"
 
     // звонки: всегда выбирать первую SIM, когда их две
     private const val K_CALL_SIM = "call_sim_first"
@@ -105,6 +112,13 @@ object Prefs {
     fun noiseSuppress(c: Context): Boolean = sp(c).getBoolean(K_NOISE, true)
     fun setNoiseSuppress(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_NOISE, v).apply()
 
+    /** Баланс между скоростью wake-word/Wi‑Fi и расходом батареи. */
+    fun energyMode(c: Context): Energy.Mode =
+        Energy.Mode.byId(sp(c).getInt(K_ENERGY, Energy.Mode.DEFAULT.id))
+
+    fun setEnergyMode(c: Context, mode: Energy.Mode) =
+        sp(c).edit().putInt(K_ENERGY, mode.id).apply()
+
     fun saidHello(c: Context): Boolean = sp(c).getBoolean(K_HELLO, false)
     fun setSaidHello(c: Context) = sp(c).edit().putBoolean(K_HELLO, true).apply()
 
@@ -123,6 +137,42 @@ object Prefs {
      */
     fun followUp(c: Context): Boolean = sp(c).getBoolean(K_FOLLOW, true)
     fun setFollowUp(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_FOLLOW, v).apply()
+
+    // ---------------------------------------------------- открытый публичный Wi‑Fi
+
+    /**
+     * Автовосстановление интернета через видимые сети без пароля.
+     * Выключено по умолчанию: пользователь сначала принимает предупреждение
+     * об открытых сетях и выдаёт системные разрешения Wi‑Fi/геолокации.
+     */
+    fun openWifiOn(c: Context): Boolean = sp(c).getBoolean(K_OPEN_WIFI, false)
+    fun setOpenWifiOn(c: Context, v: Boolean) = sp(c).edit().putBoolean(K_OPEN_WIFI, v).apply()
+
+    /** Последнее понятное человеку состояние фоновой Wi‑Fi-службы. */
+    fun openWifiStatus(c: Context): String = sp(c).getString(
+        K_OPEN_WIFI_STATUS,
+        "Ожидаю потери интернета."
+    ).orEmpty()
+
+    fun setOpenWifiStatus(c: Context, v: String) =
+        sp(c).edit().putString(K_OPEN_WIFI_STATUS, v.take(240)).apply()
+
+    /**
+     * Сети, переданные Android через WifiNetworkSuggestion. Храним их, чтобы
+     * при выключении режима удалить предложения и прекратить автоподключение.
+     */
+    fun openWifiSuggestions(c: Context): Set<String> =
+        sp(c).getStringSet(K_OPEN_WIFI_SUGGESTIONS, emptySet())?.toSet().orEmpty()
+
+    fun setOpenWifiSuggestions(c: Context, values: Set<String>) =
+        sp(c).edit().putStringSet(K_OPEN_WIFI_SUGGESTIONS, values.toSet()).apply()
+
+    /** `networkId|SSID` конфигураций, созданных Джарвисом на Android 8–9. */
+    fun openWifiLegacyNetworks(c: Context): Set<String> =
+        sp(c).getStringSet(K_OPEN_WIFI_LEGACY, emptySet())?.toSet().orEmpty()
+
+    fun setOpenWifiLegacyNetworks(c: Context, values: Set<String>) =
+        sp(c).edit().putStringSet(K_OPEN_WIFI_LEGACY, values.toSet()).apply()
 
     // ------------------------------------------------------------- звонки
 
