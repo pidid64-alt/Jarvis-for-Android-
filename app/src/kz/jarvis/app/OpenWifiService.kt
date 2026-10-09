@@ -92,6 +92,9 @@ class OpenWifiService : Service() {
 
         fun scanNow(c: Context) {
             if (!Prefs.openWifiOn(c)) return
+            // Сразу даём видимую обратную связь. Если Android не запустит
+            // службу, пользователь увидит уже конкретную ошибку из catch.
+            setStatus(c, "Ручная проверка запущена — проверяю подключение и список Wi‑Fi…")
             val i = Intent(c, OpenWifiService::class.java).setAction(ACTION_SCAN)
             try {
                 if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i)
@@ -220,6 +223,9 @@ class OpenWifiService : Service() {
     private var lastNotificationState = ""
     private var scheduledScanAt = Long.MAX_VALUE
     private var scanInFlight = false
+    private var lastScanRequestAccepted = false
+    /** Явное нажатие «Проверить сейчас» может тестировать сеть даже при mobile data. */
+    private var manualScan = false
     private var emptyScans = 0
     private var networkState = NetworkState.UNKNOWN
 
@@ -257,7 +263,19 @@ class OpenWifiService : Service() {
 
         when (intent?.action) {
             ACTION_SCAN -> {
+                // Ручная кнопка — диагностическое явное действие пользователя:
+                // проверяем открытые сети даже при рабочем mobile data. Фоновая
+                // автоматика по-прежнему сканирует только без интернета.
+                manualScan = true
                 emptyScans = 0
+                val online = validatedInternet()
+                networkState = if (online) NetworkState.ONLINE else NetworkState.OFFLINE
+                setState(
+                    if (online)
+                        "Интернет работает, но по вашей команде проверяю открытые Wi‑Fi…"
+                    else
+                        "Интернета нет — запускаю ручной поиск Wi‑Fi без пароля…"
+                )
                 scheduleScan(0, force = true)
             }
             ACTION_ENERGY_CHANGED -> rescheduleForEnergyMode()
@@ -407,33 +425,35 @@ class OpenWifiService : Service() {
         }
     }
 
-    private fun validatedInternet(): Boolean = try {
-        connectivity.allNetworks.any { network ->
-            connectivity.getNetworkCapabilities(network)
-                ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-        }
+    /**
+     * Проверяем именно активную сеть по умолчанию. allNetworks содержит ещё
+     * «доживающие» мобильные сети: на Android 13 они могли несколько секунд
+     * оставаться VALIDATED после выключения данных и полностью блокировать
+     * ручной Wi‑Fi scan, хотя трафик приложения через них уже не шёл.
+     */
+    private fun activeCapabilities(): NetworkCapabilities? = try {
+        val active = connectivity.activeNetwork
+        if (active == null) null else connectivity.getNetworkCapabilities(active)
     } catch (_: Exception) {
-        false
+        null
     }
 
-    private fun validatedWifiInternet(): Boolean = try {
-        connectivity.allNetworks.any { network ->
-            val caps = connectivity.getNetworkCapabilities(network)
-            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        }
-    } catch (_: Exception) {
-        false
+    private fun validatedInternet(): Boolean {
+        val caps = activeCapabilities() ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    private fun captivePortal(): Boolean = try {
-        connectivity.allNetworks.any { network ->
-            val caps = connectivity.getNetworkCapabilities(network)
-            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
-        }
-    } catch (_: Exception) {
-        false
+    private fun validatedWifiInternet(): Boolean {
+        val caps = activeCapabilities() ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun captivePortal(): Boolean {
+        val caps = activeCapabilities() ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
     }
 
     private fun evaluateConnection() {
@@ -451,6 +471,12 @@ class OpenWifiService : Service() {
 
         when (next) {
             NetworkState.ONLINE -> {
+                if (manualScan) {
+                    // Не отменяем явно запрошенный диагностический scan из-за
+                    // мобильной сети или запоздалого VALIDATED callback.
+                    setState("Интернет работает; продолжаю ручную проверку открытых Wi‑Fi…")
+                    return
+                }
                 cancelScheduledScan()
                 emptyScans = 0
                 legacyAttemptSsid = null
@@ -495,6 +521,7 @@ class OpenWifiService : Service() {
         scheduledScanAt = Long.MAX_VALUE
         scanInFlight = false
         forceNextScan = false
+        manualScan = false
     }
 
     private fun scheduleScan(delay: Long, force: Boolean = false) {
@@ -514,12 +541,17 @@ class OpenWifiService : Service() {
 
     private val scanTimeoutTask = Runnable {
         scanInFlight = false
-        if (!validatedInternet()) processResults(readResults())
+        if (manualScan || !validatedInternet()) processResults(readResults())
     }
 
     private fun attemptScan() {
-        if (!Prefs.openWifiOn(this) || validatedInternet()) return
+        if (!Prefs.openWifiOn(this)) {
+            manualScan = false
+            return
+        }
+        if (!manualScan && validatedInternet()) return
         if (captivePortal()) {
+            manualScan = false
             setState("Открытая точка требует входа или принятия условий Android — автоматический обход отключён.")
             scheduleScan(foundRetryDelay())
             return
@@ -530,16 +562,19 @@ class OpenWifiService : Service() {
             powerSave()
         )
         if (!permissionsGranted(this)) {
+            manualScan = false
             setState("Не могу искать сети: дайте точную геолокацию и доступ к устройствам поблизости.")
             scheduleScan(inactiveDelay)
             return
         }
         if (!locationEnabled(this)) {
+            manualScan = false
             setState("Включите геолокацию: Android не показывает результаты Wi‑Fi, пока она выключена.")
             scheduleScan(inactiveDelay)
             return
         }
         if (deviceIdle()) {
+            manualScan = false
             // В Doze активный radio scan почти всегда будет отложен системой,
             // но всё равно разбудит процесс. Ждём экрана либо длинного таймера.
             setState("Интернета нет. Телефон спит — продолжу поиск при включении экрана.")
@@ -552,6 +587,7 @@ class OpenWifiService : Service() {
                 try { @Suppress("DEPRECATION") wifi.isWifiEnabled = true } catch (_: Exception) { }
             }
             if (!wifi.isWifiEnabled) {
+                manualScan = false
                 setState("Wi‑Fi выключен. Включите его в системной панели — поиск продолжится сам.")
                 scheduleScan(inactiveDelay)
                 return
@@ -578,6 +614,7 @@ class OpenWifiService : Service() {
             false
         }
         main.removeCallbacks(scanTimeoutTask)
+        lastScanRequestAccepted = started
         scanInFlight = started
         if (!started) {
             // Android мог ограничить частоту скана; свежий системный кэш всё
@@ -631,7 +668,9 @@ class OpenWifiService : Service() {
         main.removeCallbacks(scanTask)
         scheduledScanAt = Long.MAX_VALUE
         scanInFlight = false
-        if (!Prefs.openWifiOn(this) || validatedInternet() || captivePortal()) return
+        val wasManual = manualScan
+        manualScan = false
+        if (!Prefs.openWifiOn(this) || (!wasManual && validatedInternet()) || captivePortal()) return
 
         val nowMs = SystemClock.elapsedRealtime()
         blockedUntil.entries.removeAll { it.value <= nowMs }
@@ -655,8 +694,25 @@ class OpenWifiService : Service() {
             if (!oweSupported) choices = choices.filterNot { it.enhancedOpen }
         }
         if (choices.isEmpty()) {
-            setState("Интернета нет. Открытых сетей без пароля рядом пока не найдено.")
-            scheduleScan(emptyRetryDelay())
+            val openSeen = seen.count {
+                val security = OpenWifiLogic.security(it.capabilities)
+                security == OpenWifiLogic.Security.OPEN ||
+                    security == OpenWifiLogic.Security.ENHANCED_OPEN
+            }
+            val detail = when {
+                fresh.isEmpty() && !lastScanRequestAccepted ->
+                    "Android отклонил активный scan и не отдал свежий кэш. " +
+                        "Подождите 30 секунд и нажмите «Проверить сейчас» ещё раз."
+                fresh.isEmpty() ->
+                    "Android завершил scan, но не отдал ни одной свежей сети. " +
+                        "Проверьте, что системный список Wi‑Fi видит точку."
+                openSeen == 0 ->
+                    "Android показал сетей: ${seen.size}, но все они защищены паролем."
+                else ->
+                    "Android показал открытых сетей: $openSeen, но прошивка не разрешила их использовать."
+            }
+            setState((if (validatedInternet()) "Ручная проверка. " else "Интернета нет. ") + detail)
+            if (!validatedInternet()) scheduleScan(emptyRetryDelay())
             return
         }
 
@@ -664,7 +720,7 @@ class OpenWifiService : Service() {
         if (Build.VERSION.SDK_INT >= 29) suggest(choices.take(4))
         else connectLegacy(choices)
         // После передачи сети Android новые активные scan ничего не ускоряют.
-        scheduleScan(foundRetryDelay())
+        if (!validatedInternet()) scheduleScan(foundRetryDelay())
     }
 
     // ------------------------------------------------------ Android 10+

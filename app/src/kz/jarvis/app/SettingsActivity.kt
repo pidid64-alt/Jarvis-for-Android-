@@ -524,6 +524,10 @@ class SettingsActivity : Activity() {
                 return@setOnClickListener
             }
             OpenWifiService.scanNow(this)
+            refreshOpenWifiStatus()
+            // Резервное обновление: некоторые прошивки Android 13 не доставляют
+            // локальный broadcast зарегистрированному NOT_EXPORTED receiver.
+            tvOpenWifiStatus.postDelayed({ refreshOpenWifiStatus() }, 1_200L)
             Toast.makeText(this, "Проверяю открытые сети рядом…", Toast.LENGTH_SHORT).show()
         }
 
