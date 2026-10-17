@@ -454,6 +454,14 @@ fun main() {
     check("markdown-формат тоже понимаем", 2, markdownDeck.slides.size)
     check("звёздочки как пункты", 2, markdownDeck.slides[0].bullets.size)
 
+    val boldDeck = Deck.parse(
+        "тест",
+        "ЗАГОЛОВОК: Тест\n**Слайд 1: Первый**\n- пункт\n**Слайд 2:** Второй\n- ещё пункт"
+    )
+    check("жирные заголовки слайдов не роняют Regex", 2, boldDeck.slides.size)
+    check("жирный заголовок внутри маркеров", "Первый", boldDeck.slides[0].title)
+    check("жирным выделен только префикс", "Второй", boldDeck.slides[1].title)
+
     val html = Deck.html(deck)
     check("html самодостаточен", true, html.startsWith("<!DOCTYPE html>") && html.contains("</html>"))
     check("html содержит слайды", true, html.contains("Что это такое") && html.contains("Где применяют"))

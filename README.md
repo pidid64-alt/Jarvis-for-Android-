@@ -7,6 +7,18 @@ Mistral, Together, Claude или локальная Ollama.
 
 ![Скриншот-идея](icon_master.png)
 
+## 🛠 Что исправлено в 2.9.3 (Android 16 / Vivo)
+
+- `WakeWordService` переводится в foreground немедленно из `onCreate` и первой
+  операцией `onStartCommand`; на API 29+ явно указывается тип `microphone`.
+- До старта проверяется `RECORD_AUDIO`. На Android 14–16 microphone-служба
+  создаётся только из видимого окна, а запрещённые фоновые/sticky/boot-рестарты
+  завершаются сразу вместо `ForegroundServiceDidNotStartInTimeException`.
+- Убран двойной старт службы из `MainActivity.onCreate` + `onResume`.
+- Упрощён шаблон заголовка слайда в `Deck`: markdown `**` снимается строковой
+  операцией, поэтому Vivo/Android 16 больше не падает с
+  `PatternSyntaxException: Incorrect Unicode property`.
+
 ## 🛠 Что исправлено в 2.9.2 (Wi‑Fi на Android 13+)
 
 - Проверка интернета теперь смотрит только на **активную сеть по умолчанию**.
@@ -540,7 +552,7 @@ Git-зеркал AOSP — работает даже там, где Maven Central
 ```bash
 scripts/fetch-toolchain.sh   # один раз, нужно право писать в /opt
 scripts/build-apk.sh         # соберёт releases/Jarvis-v<версия>.apk
-scripts/test-logic.sh        # 501 проверка чистой логики (быстро)
+scripts/test-logic.sh        # 504 проверки чистой логики (быстро)
 scripts/test-commands.sh     # 70 проверок диспетчера команд (компилирует всё приложение)
 ```
 
@@ -630,7 +642,7 @@ app/
 scripts/
   fetch-toolchain.sh         — скачивание тулчейна из зеркал
   build-apk.sh               — полный оффлайн-пайплайн сборки APK
-  test-logic.sh              — тесты чистой логики на JVM (501 проверка)
+  test-logic.sh              — тесты чистой логики на JVM (504 проверки)
   test-commands.sh           — тесты диспетчера команд (70 проверок)
 docs/
   example-presentation.html  — пример готовой презентации (открывается в браузере)

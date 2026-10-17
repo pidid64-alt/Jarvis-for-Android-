@@ -1,5 +1,6 @@
 package kz.jarvis.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.BatteryManager
@@ -72,12 +75,26 @@ class WakeWordService : Service() {
         var uiActive: Boolean = false
 
         fun start(c: Context) {
+            // Android 14+ проверяет while-in-use RECORD_AUDIO уже в момент
+            // создания microphone FGS. Не запускаем службу, которую система
+            // всё равно запретит перевести в foreground.
+            if (c.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                Notify.needRestart(c)
+                return
+            }
+            if (Build.VERSION.SDK_INT >= 34 && !App.uiVisible) {
+                Notify.needRestart(c)
+                return
+            }
+
             val i = Intent(c, WakeWordService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i)
                 else c.startService(i)
-            } catch (e: Exception) {
-                // Android 12+ запрещает запуск из фона — позовём пользователя уведомлением
+            } catch (_: Exception) {
+                // Android 12+ запрещает запуск из фона — позовём пользователя уведомлением.
                 Notify.needRestart(c)
             }
         }
@@ -144,6 +161,7 @@ class WakeWordService : Service() {
     private var charging = false
     private var energyMode = Energy.Mode.DEFAULT
     private var lastNotificationState = ""
+    private var foregroundStarted = false
 
     private var running = false
     private var mode = Mode.WAKE
@@ -197,7 +215,22 @@ class WakeWordService : Service() {
 
     // ------------------------------------------------------------ жизненный цикл
 
+    override fun onCreate() {
+        super.onCreate()
+        // Первая операция службы после обязательного super: Android 16/Vivo
+        // даёт считаные секунды после startForegroundService и больше не
+        // прощает даже короткую инициализацию до startForeground().
+        if (!promoteToForeground()) stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Обязательно до разбора action, SharedPreferences, TTS и любых других
+        // действий. Повторный вызов безопасен и ничего не пересоздаёт.
+        if (!promoteToForeground()) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
         when (intent?.action) {
             ACTION_OFF -> {
                 Prefs.setWakeOn(this, false)
@@ -238,10 +271,6 @@ class WakeWordService : Service() {
         }
 
         if (!running) {
-            if (!goForeground()) {
-                stopSelf(startId)
-                return START_NOT_STICKY
-            }
             running = true
             mode = Mode.WAKE
             followUp = false
@@ -261,11 +290,15 @@ class WakeWordService : Service() {
             ui.postDelayed({ restartListening() }, 250)
             ui.postDelayed(watchdog, WATCHDOG_MS)
         }
-        return START_STICKY
+        // Android 14+ не имеет права восстановить microphone FGS, пока
+        // приложение не видно. START_STICKY там создавал запрещённый фоновый
+        // рестарт и новый таймаут; пользователь поднимет службу из уведомления.
+        return if (Build.VERSION.SDK_INT >= 34) START_NOT_STICKY else START_STICKY
     }
 
     override fun onDestroy() {
         running = false
+        foregroundStarted = false
         ui.removeCallbacks(watchdog)
         try { speech?.destroy() } catch (e: Exception) { }
         speech = null
@@ -310,17 +343,46 @@ class WakeWordService : Service() {
     }
 
     /**
-     * Поднимаем foreground-уведомление. На Android 14+ из фона это запрещено
-     * для типа microphone — тогда просим пользователя нажать на уведомление.
+     * Немедленно выполняет контракт startForegroundService. На API 29+ тип
+     * передаём явно; на Android 14+ для него одновременно нужны manifest-
+     * permission FOREGROUND_SERVICE_MICROPHONE, RECORD_AUDIO и видимое окно.
      */
-    private fun goForeground(): Boolean = try {
-        val state = "Слушаю слово «Джарвис»…"
-        startForeground(NOTIF_ID, notification(state))
-        lastNotificationState = state
-        true
-    } catch (e: Exception) {
-        Notify.needRestart(this)
-        false
+    private fun promoteToForeground(): Boolean {
+        if (foregroundStarted) return true
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            Notify.needRestart(this)
+            return false
+        }
+        // Microphone — while-in-use type. Android 14–16 бросает SecurityException,
+        // если новый экземпляр службы создаётся, когда приложение уже в фоне.
+        if (Build.VERSION.SDK_INT >= 34 && !App.uiVisible) {
+            Notify.needRestart(this)
+            return false
+        }
+
+        return try {
+            val state = "Слушаю слово «Джарвис»…"
+            val n = notification(state)
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(
+                    NOTIF_ID,
+                    n,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIF_ID, n)
+            }
+            foregroundStarted = true
+            lastNotificationState = state
+            true
+        } catch (_: Exception) {
+            // Останавливаемся сразу: тогда система снимает ожидающий контракт
+            // startForegroundService вместо ForegroundServiceDidNotStartInTime.
+            Notify.needRestart(this)
+            false
+        }
     }
 
     // ------------------------------------------------------------ уведомления

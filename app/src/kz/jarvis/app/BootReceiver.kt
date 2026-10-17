@@ -3,6 +3,7 @@ package kz.jarvis.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 
 /**
  * После перезагрузки (и после обновления приложения) пытаемся вернуть
@@ -36,7 +37,14 @@ class BootReceiver : BroadcastReceiver() {
 
         if (!Prefs.wakeOn(context)) return
 
-        WakeWordService.start(context)   // сработает, если система разрешит
-        Notify.needRestart(context)      // а если нет — позовём пользователя
+        if (Build.VERSION.SDK_INT >= 34) {
+            // Microphone FGS — while-in-use: Android 14–16 категорически
+            // запрещает создавать его из BOOT_COMPLETED. Только уведомление,
+            // запуск произойдёт после открытия видимой Activity.
+            Notify.needRestart(context)
+        } else {
+            WakeWordService.start(context)
+            Notify.needRestart(context) // если прошивка всё же запретила старт
+        }
     }
 }
