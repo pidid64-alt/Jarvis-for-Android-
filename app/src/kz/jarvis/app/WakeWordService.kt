@@ -74,7 +74,12 @@ class WakeWordService : Service() {
         @Volatile
         var uiActive: Boolean = false
 
+        /** Не отправляем повторные start-команды уже живой microphone FGS. */
+        @Volatile
+        private var serviceAlive = false
+
         fun start(c: Context) {
+            if (serviceAlive) return
             // Android 14+ проверяет while-in-use RECORD_AUDIO уже в момент
             // создания microphone FGS. Не запускаем службу, которую система
             // всё равно запретит перевести в foreground.
@@ -107,12 +112,21 @@ class WakeWordService : Service() {
 
         /** Озвучить фразу службой (например, сработавшее напоминание). */
         fun speak(c: Context, text: String) {
+            if (text.isBlank()) return
+            // Ради одной TTS-фразы нельзя создавать microphone FGS из фона.
+            // Если служба не жива, Speaker умеет озвучить уведомление сам.
+            if (!serviceAlive) {
+                Speaker.once(c, text)
+                return
+            }
             try {
                 val i = Intent(c, WakeWordService::class.java)
                     .setAction(ACTION_SPEAK)
                     .putExtra(EXTRA_TEXT, text)
                 c.startService(i)
-            } catch (e: Exception) { }
+            } catch (_: Exception) {
+                Speaker.once(c, text)
+            }
         }
 
         /**
@@ -123,18 +137,20 @@ class WakeWordService : Service() {
          */
         fun notifyUi(c: Context, visible: Boolean) {
             uiActive = visible
-            if (!Prefs.wakeOn(c)) return
+            if (!Prefs.wakeOn(c) || !serviceAlive) return
             try {
                 c.startService(
                     Intent(c, WakeWordService::class.java)
                         .setAction(if (visible) ACTION_UI_ACTIVE else ACTION_RESUME)
                 )
-            } catch (e: Exception) { }
+            } catch (_: Exception) { }
         }
 
         /** Применить новый профиль батареи без перезапуска службы. */
         fun energyChanged(c: Context) {
-            if (!Prefs.wakeOn(c)) return
+            // Не создаём microphone FGS только ради перечитывания Prefs: новый
+            // экземпляр и так возьмёт профиль при штатном запуске из Activity.
+            if (!Prefs.wakeOn(c) || !serviceAlive) return
             try {
                 c.startService(
                     Intent(c, WakeWordService::class.java).setAction(ACTION_ENERGY_CHANGED)
@@ -220,7 +236,7 @@ class WakeWordService : Service() {
         // Первая операция службы после обязательного super: Android 16/Vivo
         // даёт считаные секунды после startForegroundService и больше не
         // прощает даже короткую инициализацию до startForeground().
-        if (!promoteToForeground()) stopSelf()
+        if (promoteToForeground()) serviceAlive = true else stopSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -230,6 +246,7 @@ class WakeWordService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        serviceAlive = true
 
         when (intent?.action) {
             ACTION_OFF -> {
@@ -297,6 +314,7 @@ class WakeWordService : Service() {
     }
 
     override fun onDestroy() {
+        serviceAlive = false
         running = false
         foregroundStarted = false
         ui.removeCallbacks(watchdog)

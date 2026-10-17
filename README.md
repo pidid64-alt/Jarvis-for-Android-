@@ -7,6 +7,15 @@ Mistral, Together, Claude или локальная Ollama.
 
 ![Скриншот-идея](icon_master.png)
 
+## 🛠 Что дополнительно исправлено в 2.9.4
+
+- Повторный `startForegroundService` больше не отправляется уже работающей
+  wake-службе при каждом `onResume`.
+- `notifyUi` и смена профиля батареи не могут случайно создать microphone FGS
+  обычным `startService`, пока служба ещё не запущена.
+- Фоновая озвучка напоминания при остановленной wake-службе идёт напрямую через
+  `Speaker`, не пытаясь ради TTS незаконно поднять microphone FGS.
+
 ## 🛠 Что исправлено в 2.9.3 (Android 16 / Vivo)
 
 - `WakeWordService` переводится в foreground немедленно из `onCreate` и первой
