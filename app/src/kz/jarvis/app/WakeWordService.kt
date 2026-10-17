@@ -1,18 +1,26 @@
 package kz.jarvis.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.RecognitionListener
@@ -47,11 +55,14 @@ class WakeWordService : Service() {
         const val ACTION_SPEAK = "kz.jarvis.app.action.SPEAK"
         const val ACTION_RESUME = "kz.jarvis.app.action.RESUME"
         const val ACTION_UI_ACTIVE = "kz.jarvis.app.action.UI_ACTIVE"
+        const val ACTION_ENERGY_CHANGED = "kz.jarvis.app.action.ENERGY_CHANGED"
         const val ACTION_OFF = "kz.jarvis.app.action.OFF"
         const val EXTRA_TEXT = "kz.jarvis.app.extra.TEXT"
 
         private const val NOTIF_ID = 1
-        private const val WATCHDOG_MS = 4_000L
+        // Раньше проверяли каждые 4 секунды и будили CPU даже при исправном
+        // микрофоне. RMS-callback теперь отмечает его живым, поэтому 12 секунд достаточно.
+        private const val WATCHDOG_MS = 12_000L
 
         /**
          * Пауза в разговоре, после которой непрерывный диалог заканчивается
@@ -63,13 +74,32 @@ class WakeWordService : Service() {
         @Volatile
         var uiActive: Boolean = false
 
+        /** Не отправляем повторные start-команды уже живой microphone FGS. */
+        @Volatile
+        private var serviceAlive = false
+
         fun start(c: Context) {
+            if (serviceAlive) return
+            // Android 14+ проверяет while-in-use RECORD_AUDIO уже в момент
+            // создания microphone FGS. Не запускаем службу, которую система
+            // всё равно запретит перевести в foreground.
+            if (c.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                Notify.needRestart(c)
+                return
+            }
+            if (Build.VERSION.SDK_INT >= 34 && !App.uiVisible) {
+                Notify.needRestart(c)
+                return
+            }
+
             val i = Intent(c, WakeWordService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i)
                 else c.startService(i)
-            } catch (e: Exception) {
-                // Android 12+ запрещает запуск из фона — позовём пользователя уведомлением
+            } catch (_: Exception) {
+                // Android 12+ запрещает запуск из фона — позовём пользователя уведомлением.
                 Notify.needRestart(c)
             }
         }
@@ -82,12 +112,21 @@ class WakeWordService : Service() {
 
         /** Озвучить фразу службой (например, сработавшее напоминание). */
         fun speak(c: Context, text: String) {
+            if (text.isBlank()) return
+            // Ради одной TTS-фразы нельзя создавать microphone FGS из фона.
+            // Если служба не жива, Speaker умеет озвучить уведомление сам.
+            if (!serviceAlive) {
+                Speaker.once(c, text)
+                return
+            }
             try {
                 val i = Intent(c, WakeWordService::class.java)
                     .setAction(ACTION_SPEAK)
                     .putExtra(EXTRA_TEXT, text)
                 c.startService(i)
-            } catch (e: Exception) { }
+            } catch (_: Exception) {
+                Speaker.once(c, text)
+            }
         }
 
         /**
@@ -98,13 +137,25 @@ class WakeWordService : Service() {
          */
         fun notifyUi(c: Context, visible: Boolean) {
             uiActive = visible
-            if (!Prefs.wakeOn(c)) return
+            if (!Prefs.wakeOn(c) || !serviceAlive) return
             try {
                 c.startService(
                     Intent(c, WakeWordService::class.java)
                         .setAction(if (visible) ACTION_UI_ACTIVE else ACTION_RESUME)
                 )
-            } catch (e: Exception) { }
+            } catch (_: Exception) { }
+        }
+
+        /** Применить новый профиль батареи без перезапуска службы. */
+        fun energyChanged(c: Context) {
+            // Не создаём microphone FGS только ради перечитывания Prefs: новый
+            // экземпляр и так возьмёт профиль при штатном запуске из Activity.
+            if (!Prefs.wakeOn(c) || !serviceAlive) return
+            try {
+                c.startService(
+                    Intent(c, WakeWordService::class.java).setAction(ACTION_ENERGY_CHANGED)
+                )
+            } catch (_: Exception) { }
         }
     }
 
@@ -121,6 +172,12 @@ class WakeWordService : Service() {
     private var tone: ToneGenerator? = null
     private var tts: TtsController? = null
     private var overlay: OverlayController? = null
+    private var powerManager: PowerManager? = null
+    private var powerReceiverRegistered = false
+    private var charging = false
+    private var energyMode = Energy.Mode.DEFAULT
+    private var lastNotificationState = ""
+    private var foregroundStarted = false
 
     private var running = false
     private var mode = Mode.WAKE
@@ -129,7 +186,7 @@ class WakeWordService : Service() {
     /** Идёт долгая работа (поиск в интернете, Клод, сборка презентации). */
     @Volatile private var working = false
     private var lastTrigger = 0L
-    private var lastCallback = System.currentTimeMillis()
+    private var lastCallback = SystemClock.elapsedRealtime()
     private var snoozeUntil = 0L
     private var errorStreak = 0
 
@@ -160,11 +217,37 @@ class WakeWordService : Service() {
     /** Показали ли «микрофон выключен в системе». */
     private var noticedMicMute = false
 
+    private val powerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
+                val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+            }
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     // ------------------------------------------------------------ жизненный цикл
 
+    override fun onCreate() {
+        super.onCreate()
+        // Первая операция службы после обязательного super: Android 16/Vivo
+        // даёт считаные секунды после startForegroundService и больше не
+        // прощает даже короткую инициализацию до startForeground().
+        if (promoteToForeground()) serviceAlive = true else stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Обязательно до разбора action, SharedPreferences, TTS и любых других
+        // действий. Повторный вызов безопасен и ничего не пересоздаёт.
+        if (!promoteToForeground()) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        serviceAlive = true
+
         when (intent?.action) {
             ACTION_OFF -> {
                 Prefs.setWakeOn(this, false)
@@ -183,6 +266,9 @@ class WakeWordService : Service() {
             ACTION_RESUME -> {
                 if (running && !snoozed() && speech == null) restartListening(200)
             }
+            ACTION_ENERGY_CHANGED -> {
+                energyMode = Prefs.energyMode(this)
+            }
             ACTION_UI_ACTIVE -> {
                 // окно приложения открылось — отдаём ему микрофон немедленно,
                 // иначе два распознавателя дерутся и микрофон «сбрасывается».
@@ -193,22 +279,23 @@ class WakeWordService : Service() {
                     mode = Mode.WAKE
                     try { speech?.destroy() } catch (e: Exception) { }
                     speech = null
-                    restartListening(3_000)
+                    // Не опрашиваем состояние каждые три секунды: при закрытии
+                    // окна MainActivity пришлёт ACTION_RESUME, а watchdog остаётся
+                    // резервной страховкой.
+                    listenGen++
                 }
             }
         }
 
         if (!running) {
-            if (!goForeground()) {
-                stopSelf(startId)
-                return START_NOT_STICKY
-            }
             running = true
             mode = Mode.WAKE
             followUp = false
             waitingFollowUp = false
             closeAfterReply = false
             snoozeUntil = Prefs.snoozeUntil(this)
+            energyMode = Prefs.energyMode(this)
+            registerPowerState()
             AudioFx.sync(this)   // шумоподавление микрофона
             Voice.syncFx(this)   // эффект «брони» для голоса, если включён
             tone = try {
@@ -220,11 +307,16 @@ class WakeWordService : Service() {
             ui.postDelayed({ restartListening() }, 250)
             ui.postDelayed(watchdog, WATCHDOG_MS)
         }
-        return START_STICKY
+        // Android 14+ не имеет права восстановить microphone FGS, пока
+        // приложение не видно. START_STICKY там создавал запрещённый фоновый
+        // рестарт и новый таймаут; пользователь поднимет службу из уведомления.
+        return if (Build.VERSION.SDK_INT >= 34) START_NOT_STICKY else START_STICKY
     }
 
     override fun onDestroy() {
+        serviceAlive = false
         running = false
+        foregroundStarted = false
         ui.removeCallbacks(watchdog)
         try { speech?.destroy() } catch (e: Exception) { }
         speech = null
@@ -233,22 +325,82 @@ class WakeWordService : Service() {
         tts?.shutdown()
         tts = null
         overlay?.hide()
+        if (powerReceiverRegistered) {
+            try { unregisterReceiver(powerReceiver) } catch (_: Exception) { }
+            powerReceiverRegistered = false
+        }
+        powerManager = null
         Voice.releaseFx()
         // служба умерла и окно закрыто — шумоподавление больше не нужно
         if (!App.uiVisible) AudioFx.release()
         super.onDestroy()
     }
 
+    /** Один системный receiver вместо опроса батареи после каждой сессии. */
+    private fun registerPowerState() {
+        powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (powerReceiverRegistered) return
+        try {
+            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            val sticky = if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(powerReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(powerReceiver, filter)
+            }
+            powerReceiverRegistered = true
+            if (sticky != null) powerReceiver.onReceive(this, sticky)
+        } catch (_: Exception) { }
+    }
+
+    private fun wakeIdleDelay(): Long {
+        val pm = powerManager
+        val interactive = try { pm?.isInteractive ?: true } catch (_: Exception) { true }
+        val powerSave = try { pm?.isPowerSaveMode ?: false } catch (_: Exception) { false }
+        return Energy.wakeRestartDelayMs(energyMode, interactive, charging, powerSave)
+    }
+
     /**
-     * Поднимаем foreground-уведомление. На Android 14+ из фона это запрещено
-     * для типа microphone — тогда просим пользователя нажать на уведомление.
+     * Немедленно выполняет контракт startForegroundService. На API 29+ тип
+     * передаём явно; на Android 14+ для него одновременно нужны manifest-
+     * permission FOREGROUND_SERVICE_MICROPHONE, RECORD_AUDIO и видимое окно.
      */
-    private fun goForeground(): Boolean = try {
-        startForeground(NOTIF_ID, notification("Слушаю слово «Джарвис»…"))
-        true
-    } catch (e: Exception) {
-        Notify.needRestart(this)
-        false
+    private fun promoteToForeground(): Boolean {
+        if (foregroundStarted) return true
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            Notify.needRestart(this)
+            return false
+        }
+        // Microphone — while-in-use type. Android 14–16 бросает SecurityException,
+        // если новый экземпляр службы создаётся, когда приложение уже в фоне.
+        if (Build.VERSION.SDK_INT >= 34 && !App.uiVisible) {
+            Notify.needRestart(this)
+            return false
+        }
+
+        return try {
+            val state = "Слушаю слово «Джарвис»…"
+            val n = notification(state)
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(
+                    NOTIF_ID,
+                    n,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIF_ID, n)
+            }
+            foregroundStarted = true
+            lastNotificationState = state
+            true
+        } catch (_: Exception) {
+            // Останавливаемся сразу: тогда система снимает ожидающий контракт
+            // startForegroundService вместо ForegroundServiceDidNotStartInTime.
+            Notify.needRestart(this)
+            false
+        }
     }
 
     // ------------------------------------------------------------ уведомления
@@ -278,6 +430,10 @@ class WakeWordService : Service() {
     }
 
     private fun notifyState(state: String) {
+        // NotificationManager — межпроцессный вызов. Не пересобираем одно и то
+        // же уведомление при каждом callback распознавателя.
+        if (state == lastNotificationState) return
+        lastNotificationState = state
         try {
             getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(state))
         } catch (e: Exception) { }
@@ -303,7 +459,10 @@ class WakeWordService : Service() {
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            // В режиме ожидания partial results не используются, но раньше
+            // прилетали десятки IPC-callback в секунду. Для самой команды они
+            // остаются — текст по-прежнему виден на сфере.
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, mode != Mode.WAKE)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             // Длинные команды (например, сообщение в WhatsApp) должны
             // распознаваться целиком, а не обрываться после двух слов.
@@ -322,38 +481,59 @@ class WakeWordService : Service() {
      * после закрытия окна приложения залпом создавались десятки распознавателей
      * и микрофон «сбрасывался»).
      */
-    private fun restartListening(delay: Long = 300) {
+    private fun restartListening(delay: Long = 300, recreate: Boolean = false) {
         if (!running) return
         val gen = ++listenGen
         ui.postDelayed({
             if (!running || gen != listenGen) return@postDelayed
             // говорит ли кто-то из Джарвисов (окно, служба, напоминание) —
-            // микрофон в это время не включаем: услышим собственный голос
-            if (speaking || SpeechState.speaking()) { restartListening(500); return@postDelayed }
-            if (snoozed()) { restartListening(5_000); return@postDelayed }
+            // микрофон в это время не включаем: услышим собственный голос.
+            // Флаг recreate несём дальше: watchdog действительно должен
+            // заменить зависший экземпляр после окончания речи/сна.
+            if (speaking || SpeechState.speaking()) {
+                restartListening(500, recreate)
+                return@postDelayed
+            }
+            if (snoozed()) {
+                // snooze() уже поставил один таймер на точное время пробуждения;
+                // если сон пришёл из окна, watchdog проверит окончание. Не
+                // будим CPU каждые пять секунд на протяжении всего сна.
+                return@postDelayed
+            }
             if (uiActive && mode == Mode.WAKE) {
                 // окно приложения открыто и само владеет микрофоном — не мешаем,
                 // но если микрофон остался у нас, освобождаем
-                try { speech?.destroy() } catch (e: Exception) { }
+                try { speech?.destroy() } catch (_: Exception) { }
                 speech = null
-                restartListening(3_000)
+                // ACTION_RESUME поднимет микрофон, когда окно закроется.
+                // Циклическая проверка каждые 3 секунды здесь только будила CPU.
                 return@postDelayed
             }
-            try { speech?.destroy() } catch (e: Exception) { }
-            speech = null
-            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            if (recreate) {
+                try { speech?.destroy() } catch (_: Exception) { }
+                speech = null
+            }
+            if (speech == null && !SpeechRecognizer.isRecognitionAvailable(this)) {
                 notifyState("Распознавание речи недоступно на этом устройстве")
-                restartListening(60_000)
+                restartListening(60_000, recreate = true)
                 return@postDelayed
             }
             try {
-                speech = SpeechRecognizer.createSpeechRecognizer(this).apply {
-                    setRecognitionListener(listener)
+                // Один SpeechRecognizer можно штатно использовать для многих
+                // последовательных сессий. Раньше мы destroy/create делали
+                // после каждой тишины — это заново связывало speech service и
+                // аудиотракт десятки раз в час.
+                if (speech == null) {
+                    speech = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                        setRecognitionListener(listener)
+                    }
                 }
                 speech?.startListening(recognizerIntent())
-                lastCallback = System.currentTimeMillis()
-            } catch (e: Exception) {
-                restartListening(2_000)
+                lastCallback = SystemClock.elapsedRealtime()
+            } catch (_: Exception) {
+                try { speech?.destroy() } catch (_: Exception) { }
+                speech = null
+                restartListening(2_000, recreate = true)
             }
         }, delay)
     }
@@ -367,13 +547,19 @@ class WakeWordService : Service() {
     private val watchdog = object : Runnable {
         override fun run() {
             if (!running) return
+            if (snoozed()) {
+                // Во сне нет смысла будить watchdog каждые 12 секунд.
+                val remaining = (snoozeUntil - System.currentTimeMillis())
+                    .coerceAtLeast(WATCHDOG_MS)
+                ui.postDelayed(this, remaining)
+                return
+            }
             ui.postDelayed(this, WATCHDOG_MS)
             if (speaking || working || SpeechState.speaking()) return
-            val idle = System.currentTimeMillis() - lastCallback
+            val idle = SystemClock.elapsedRealtime() - lastCallback
             when {
-                snoozed() -> { /* спим */ }
                 mode == Mode.WAKE && uiActive -> { /* микрофон у окна приложения */ }
-                mode == Mode.WAKE && idle > 15_000 -> {
+                mode == Mode.WAKE && idle > 35_000 -> {
                     silentDrops++
                     val delay = when {
                         silentDrops <= 2 -> 0L
@@ -384,7 +570,7 @@ class WakeWordService : Service() {
                         noticedMicDrop = true
                         notifyState("Микрофон сбрасывался — перезапускаю прослушивание…")
                     }
-                    restartListening(delay)
+                    restartListening(delay, recreate = true)
                 }
                 // непрерывный диалог: собеседник замолчал — сессия закрыта,
                 // снова ждём «Джарвис»
@@ -477,13 +663,13 @@ class WakeWordService : Service() {
         } catch (e: Exception) { }
     }
 
-    private fun backToWake() {
+    private fun backToWake(recreate: Boolean = false) {
         followUp = false
         waitingFollowUp = false
         mode = Mode.WAKE
         overlay?.autoHide(2_500)
         notifyState("Слушаю слово «Джарвис»…")
-        restartListening(350)
+        restartListening(350, recreate)
     }
 
     /** Тихая концовка непрерывного диалога: собеседник замолчал. */
@@ -709,7 +895,7 @@ class WakeWordService : Service() {
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
-            lastCallback = System.currentTimeMillis()
+            lastCallback = SystemClock.elapsedRealtime()
             silentDrops = 0
             errorStreak = 0
             if (noticedMicDrop) {
@@ -720,18 +906,28 @@ class WakeWordService : Service() {
         }
 
         override fun onBeginningOfSpeech() {
-            lastCallback = System.currentTimeMillis()
+            lastCallback = SystemClock.elapsedRealtime()
         }
 
-        override fun onRmsChanged(rmsdB: Float) {}
-        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onRmsChanged(rmsdB: Float) {
+            // RMS — признак, что распознаватель жив. Раньше watchdog этого не
+            // знал и каждые ~15 секунд уничтожал исправный микрофон, создавая
+            // новый SpeechRecognizer и лишнюю нагрузку.
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastCallback >= 2_000L) lastCallback = now
+        }
+
+        override fun onBufferReceived(buffer: ByteArray?) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastCallback >= 2_000L) lastCallback = now
+        }
 
         override fun onEndOfSpeech() {
-            lastCallback = System.currentTimeMillis()
+            lastCallback = SystemClock.elapsedRealtime()
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
-            lastCallback = System.currentTimeMillis()
+            lastCallback = SystemClock.elapsedRealtime()
             if (mode != Mode.WAKE) {
                 val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
@@ -747,7 +943,7 @@ class WakeWordService : Service() {
         }
 
         override fun onResults(results: Bundle?) {
-            lastCallback = System.currentTimeMillis()
+            lastCallback = SystemClock.elapsedRealtime()
             errorStreak = 0
             silentDrops = 0
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -763,7 +959,7 @@ class WakeWordService : Service() {
                     val tail = WakeWords.removeFromText(hitText)
                     onWake(tail.ifBlank { null })
                 } else {
-                    restartListening(150)
+                    restartListening(wakeIdleDelay())
                 }
             } else {
                 val text = texts?.firstOrNull { !it.isNullOrBlank() }
@@ -782,7 +978,7 @@ class WakeWordService : Service() {
         }
 
         override fun onError(error: Int) {
-            lastCallback = System.currentTimeMillis()
+            lastCallback = SystemClock.elapsedRealtime()
             if (mode == Mode.COMMAND &&
                 (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
             ) {
@@ -795,10 +991,20 @@ class WakeWordService : Service() {
                 }
                 return
             }
+            if (mode == Mode.WAKE &&
+                (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+            ) {
+                // Обычная тишина — не ошибка. Между одноразовыми сессиями
+                // делаем паузу согласно профилю батареи.
+                errorStreak = 0
+                silentDrops = 0
+                restartListening(wakeIdleDelay())
+                return
+            }
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                 notifyState("Нет доступа к микрофону — откройте Джарвис и дайте разрешение")
                 Notify.needRestart(this@WakeWordService)
-                restartListening(30_000)
+                restartListening(30_000, recreate = true)
                 return
             }
             errorStreak++
@@ -822,9 +1028,11 @@ class WakeWordService : Service() {
                 else -> 500L
             }
             if (mode == Mode.COMMAND && errorStreak > 2 && !waitingFollowUp) {
-                backToWake()
+                backToWake(recreate = true)
             } else {
-                restartListening(delay)
+                // Неожиданная ошибка могла оставить binder/аудиотракт в
+                // плохом состоянии; здесь экономия на reuse неуместна.
+                restartListening(delay, recreate = true)
             }
         }
 

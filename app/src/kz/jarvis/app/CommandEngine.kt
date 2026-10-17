@@ -101,6 +101,11 @@ object CommandEngine {
         // ---------- управление самой службой ----------
         serviceCmd(ctx, s)?.let { return it }
 
+        // ---------- восстановление интернета через публичный Wi‑Fi ----------
+        // Проверяем до общего интернет-поиска: «найди вайфай без пароля» —
+        // команда телефону, а не запрос поисковику.
+        openWifi(ctx, s)?.let { return it }
+
         // ---------- голос Джарвиса (включая эмоции: разбираются внутри voice) ----------
         voice(ctx, s)?.let { return it }
 
@@ -1372,6 +1377,43 @@ object CommandEngine {
     }
 
     // ------------------------------------------------- сеть и системные настройки
+
+    /**
+     * Отдельный добровольный режим, а не обычное «включи Wi‑Fi»: перед первым
+     * включением пользователь принимает предупреждение и разрешения Android.
+     */
+    private fun openWifi(ctx: Context, s: String): Outcome? {
+        fun settings(reply: String) = Outcome(
+            reply,
+            Intent(ctx, SettingsActivity::class.java)
+                .putExtra(SettingsActivity.EXTRA_OPEN_WIFI_SETUP, true)
+                .withTask(ctx)
+        )
+        return when (OpenWifiLogic.command(s)) {
+            OpenWifiLogic.Command.ENABLE -> {
+                if (Prefs.openWifiOn(ctx)) {
+                    OpenWifiService.scanNow(ctx)
+                    Outcome("Автоподключение уже включено. Проверяю открытые сети, сэр.")
+                } else {
+                    settings("Открыл настройку бесплатного Wi‑Fi. Прочитайте предупреждение и подтвердите включение, сэр.")
+                }
+            }
+            OpenWifiLogic.Command.DISABLE -> {
+                OpenWifiService.disable(ctx)
+                Outcome("Автоподключение к сетям без пароля выключено, сэр.")
+            }
+            OpenWifiLogic.Command.SCAN -> {
+                if (!Prefs.openWifiOn(ctx)) {
+                    settings("Сначала подтвердите безопасное использование открытых сетей в настройках, сэр.")
+                } else {
+                    OpenWifiService.scanNow(ctx)
+                    Outcome("Проверяю бесплатные точки Wi‑Fi рядом, сэр.")
+                }
+            }
+            OpenWifiLogic.Command.STATUS -> Outcome(OpenWifiService.status(ctx))
+            null -> null
+        }
+    }
 
     private fun systemPanel(ctx: Context, s: String): Outcome? {
         fun panel(reply: String, intent: Intent) = Outcome(reply, intent.withTask(ctx))

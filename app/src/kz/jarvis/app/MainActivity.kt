@@ -109,7 +109,9 @@ class MainActivity : Activity() {
 
         handleWakeIntent(intent)
         refreshWakeIcon()
-        ensureWakeService()
+        // Microphone FGS запускаем только из onResume: Android 14–16 ещё не
+        // считает Activity видимой во время onCreate и запрещает while-in-use тип.
+        if (Prefs.openWifiOn(this)) OpenWifiService.start(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -122,7 +124,8 @@ class MainActivity : Activity() {
         if (intent == null) return
         if (intent.getBooleanExtra(EXTRA_RESTART_WAKE, false)) {
             Prefs.setWakeOn(this, true)
-            WakeWordService.start(this)
+            // onCreate ещё не даёт права на microphone FGS в Android 14+;
+            // фактический запуск выполнит ensureWakeService() из onResume.
             Toast.makeText(this, "Прослушивание включено — скажите «Джарвис»", Toast.LENGTH_LONG).show()
             intent.removeExtra(EXTRA_RESTART_WAKE)
         }
@@ -137,8 +140,10 @@ class MainActivity : Activity() {
         tts.enabled = Prefs.ttsOn(this)
         tts.refresh()   // голос могли поменять в настройках
         refreshWakeIcon()
-        WakeWordService.notifyUi(this, true)
+        // Сначала законный startForegroundService из видимого окна, затем
+        // передаём службе состояние UI обычным action.
         ensureWakeService()
+        WakeWordService.notifyUi(this, true)
     }
 
     override fun onPause() {

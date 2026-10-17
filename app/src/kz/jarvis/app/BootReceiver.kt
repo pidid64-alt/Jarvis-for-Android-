@@ -3,6 +3,7 @@ package kz.jarvis.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 
 /**
  * После перезагрузки (и после обновления приложения) пытаемся вернуть
@@ -26,9 +27,24 @@ class BootReceiver : BroadcastReceiver() {
         // Напоминания и таймеры AlarmManager забывает после перезагрузки.
         try { ReminderScheduler.restore(context) } catch (e: Exception) { }
 
+        // Wi‑Fi-службе не нужен микрофон, поэтому Android разрешает вернуть её
+        // после загрузки отдельно от голосовой активации. При LOCKED_BOOT
+        // обычные SharedPreferences ещё могут быть недоступны — тогда повторит
+        // BOOT_COMPLETED после разблокировки.
+        try {
+            if (Prefs.openWifiOn(context)) OpenWifiService.start(context)
+        } catch (_: Exception) { }
+
         if (!Prefs.wakeOn(context)) return
 
-        WakeWordService.start(context)   // сработает, если система разрешит
-        Notify.needRestart(context)      // а если нет — позовём пользователя
+        if (Build.VERSION.SDK_INT >= 34) {
+            // Microphone FGS — while-in-use: Android 14–16 категорически
+            // запрещает создавать его из BOOT_COMPLETED. Только уведомление,
+            // запуск произойдёт после открытия видимой Activity.
+            Notify.needRestart(context)
+        } else {
+            WakeWordService.start(context)
+            Notify.needRestart(context) // если прошивка всё же запретила старт
+        }
     }
 }
